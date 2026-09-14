@@ -33,9 +33,6 @@ Nodo = tuple[int, ...]
 Arco = tuple[Nodo, Nodo]
 
 
-
-
-
 # ----------------------------------------------------------------------
 # FASE 3.2 — Indicatori di fattibilita' f1, f2
 # ----------------------------------------------------------------------
@@ -43,8 +40,96 @@ Arco = tuple[Nodo, Nodo]
 # f1(i,j): fattibile visitare j+ -> i+ -> j- -> i-   (il giro di i "annidato" in quello di j)
 # f2(i,j): fattibile visitare j+ -> i+ -> i- -> j-   (i sale e scende, tutto dentro il giro di j)
 #
-# Convenzione del paper: f1(i,0) = f1(0,i) = f2(i,0) = f2(0,i) = 1 
-# il "deposito" come utente fittizio non impone mai vincoli.
+# Convenzione del paper: f1(i,0) = f1(0,i) = f2(i,0) = f2(0,i) = 1 (il "deposito"
+# come utente fittizio non impone mai vincoli).
+
+EPS = 1e-9  # tolleranza sui confronti float (i ride time cadono spesso esattamente su L)
+
+METODI_FATTIBILITA = ("esatto", "forward")
+_metodo_fattibilita = "esatto"
+
+
+def imposta_metodo_fattibilita(metodo: str) -> None:
+    """Sceglie l'implementazione di f1/f2 usata dal resto del modulo.
+
+    "esatto"  -> esiste uno schedule ammissibile? (definizione del paper)
+    "forward" -> lo schedule "tutto il prima possibile" e' ammissibile?
+                 Condizione piu' stretta: conservata solo per confronto.
+    """
+    global _metodo_fattibilita
+    if metodo not in METODI_FATTIBILITA:
+        raise ValueError(f"metodo non valido: {metodo!r} (attesi {METODI_FATTIBILITA})")
+    _metodo_fattibilita = metodo
+
+
+def metodo_fattibilita() -> str:
+    """Implementazione di f1/f2 attualmente attiva."""
+    return _metodo_fattibilita
+
+
+# --- implementazione esatta (default) ---------------------------------
+
+def _esiste_schedule(sequenza_id: list[int],
+                     vincoli_ride: list[tuple[int, int]],
+                     istanza: Istanza) -> bool:
+    """
+    Esiste un'assegnazione di tempi di inizio servizio B ammissibile lungo la
+    sequenza data? Questa e' la domanda che il paper pone con f1/f2.
+
+    Tutti i vincoli in gioco hanno la forma B_u - B_v <= c:
+        B_k >= e_k                      ->  B_rif - B_k <= -e_k
+        B_k <= l_k                      ->  B_k - B_rif <=  l_k
+        B_{k+1} >= B_k + s_k + t        ->  B_k - B_{k+1} <= -(s_k + t)
+        B_d - B_p <= L + s_p            ->  gia' in forma
+    Un sistema di vincoli di differenza e' ammissibile se e solo se il suo
+    grafo dei vincoli non contiene cicli negativi (Bellman-Ford).
+
+    vincoli_ride: coppie (posizione del pickup, posizione della delivery)
+    nella sequenza, una per ogni utente il cui ride time va limitato.
+    """
+    n = len(sequenza_id)
+    RIF = n                                   # nodo di riferimento, B_RIF = 0
+    archi: list[tuple[int, int, float]] = []   # (u, v, peso) <=> B_u - B_v <= peso
+
+    for k, id_nodo in enumerate(sequenza_id):
+        nodo = istanza.nodo(id_nodo)
+        archi.append((k, RIF, nodo.l))
+        archi.append((RIF, k, -nodo.e))
+
+    for k in range(n - 1):
+        nodo = istanza.nodo(sequenza_id[k])
+        tratta = istanza.distanza(sequenza_id[k], sequenza_id[k + 1])
+        archi.append((k, k + 1, -(nodo.servizio + tratta)))
+
+    for pos_p, pos_d in vincoli_ride:
+        s_p = istanza.nodo(sequenza_id[pos_p]).servizio
+        archi.append((pos_d, pos_p, istanza.L + s_p))
+
+    dist = [0.0] * (n + 1)
+    for _ in range(n + 1):
+        aggiornato = False
+        for u, v, peso in archi:
+            if dist[u] + peso < dist[v] - EPS:
+                dist[v] = dist[u] + peso
+                aggiornato = True
+        if not aggiornato:
+            return True          # punto fisso raggiunto: nessun ciclo negativo
+    return False                 # ancora in aggiornamento dopo |V| passate
+
+
+def _f1_esatto(i: int, j: int, istanza: Istanza) -> bool:
+    sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
+                istanza.delivery(j).id, istanza.delivery(i).id]
+    return _esiste_schedule(sequenza, [(1, 3), (0, 2)], istanza)
+
+
+def _f2_esatto(i: int, j: int, istanza: Istanza) -> bool:
+    sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
+                istanza.delivery(i).id, istanza.delivery(j).id]
+    return _esiste_schedule(sequenza, [(1, 2), (0, 3)], istanza)
+
+
+# --- implementazione forward (variante di confronto) ------------------
 
 def _orari_fattibili(sequenza_id: list[int], istanza: Istanza) -> list[float] | None:
     """
@@ -52,76 +137,69 @@ def _orari_fattibili(sequenza_id: list[int], istanza: Istanza) -> list[float] | 
     localita' (dati i loro id in Istanza). Ritorna la lista dei B se la
     sequenza rispetta tutte le finestre temporali, altrimenti None.
 
-    Regola di propagazione: si arriva alla fermata successiva non prima di
-    aver finito il servizio alla fermata precedente e aver percorso la
-    distanza tra le due; se si arriva in anticipo rispetto alla finestra, si
-    aspetta (B = e). Se si arriva dopo la chiusura della finestra, la
-    sequenza e' infattibile.
+    ATTENZIONE: costruisce UN solo schedule, quello "tutto il prima possibile".
+    E' dominante per le finestre temporali ma non per i ride time: ogni attesa
+    a bordo gonfia il ride time dei passeggeri gia' caricati. Usata solo dalla
+    variante "forward" di f1/f2.
     """
     B: list[float] = []
-
-    for idx, id_nodo in enumerate(sequenza_id): # per ogni nodo della sequenza, calcolo il tempo di inizio servizio B
-        """
-        enumerate(sequenza_id) restituisce una coppia (indice, valore) per ogni elemento della lista 
-        (es.) sequenza_id=[5,21,42,7] => idx=[0,1,2,3], id_nodo=[5,21,42,7]
-        """    
-
+    for idx, id_nodo in enumerate(sequenza_id):
         nodo = istanza.nodo(id_nodo)
-        if idx == 0: # idx sarà sempre 0 per il primo nodo della sequenza, quindi il tempo di arrivo sarà sempre la finestra di apertura del nodo
-            arrivo = nodo.e 
-        else: # altrimenti calcolo il tempo di arrivo in base al nodo precedente e alla distanza
+        if idx == 0:
+            arrivo = nodo.e  # nessun vincolo a monte: nel caso migliore si arriva ad e
+        else:
             id_prec = sequenza_id[idx - 1]
             nodo_prec = istanza.nodo(id_prec)
-            arrivo = B[idx - 1] + nodo_prec.servizio + istanza.distanza(id_prec, id_nodo) # tempo di arrivo = tempo di inizio servizio precedente + tempo di servizio precedente + distanza tra i due nodi
-        inizio = max(arrivo, nodo.e) # l'inizio del servizio e' il massimo tra il tempo di arrivo e la finestra di apertura del nodo
-        if inizio > nodo.l:
+            arrivo = B[idx - 1] + nodo_prec.servizio + istanza.distanza(id_prec, id_nodo)
+        inizio = max(arrivo, nodo.e)
+        if inizio > nodo.l + EPS:
             return None
-        B.append(inizio) # aggiungo il tempo di inizio servizio alla lista B, per ogni nodo della sequenza
+        B.append(inizio)
     return B
 
 
+def _f_forward(sequenza: list[int], vincoli_ride: list[tuple[int, int]],
+               istanza: Istanza) -> bool:
+    B = _orari_fattibili(sequenza, istanza)
+    if B is None:
+        return False
+    for pos_p, pos_d in vincoli_ride:
+        s_p = istanza.nodo(sequenza[pos_p]).servizio
+        if B[pos_d] - (B[pos_p] + s_p) > istanza.L + EPS:
+            return False
+    return True
 
 
-def f1(i: int, j: int, istanza: Istanza) -> bool: #i e j vengono passati dalla funzione genera_companion_validi()
+def _f1_forward(i: int, j: int, istanza: Istanza) -> bool:
+    sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
+                istanza.delivery(j).id, istanza.delivery(i).id]
+    return _f_forward(sequenza, [(1, 3), (0, 2)], istanza)
+
+
+def _f2_forward(i: int, j: int, istanza: Istanza) -> bool:
+    sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
+                istanza.delivery(i).id, istanza.delivery(j).id]
+    return _f_forward(sequenza, [(1, 2), (0, 3)], istanza)
+
+
+# --- interfaccia pubblica ---------------------------------------------
+
+def f1(i: int, j: int, istanza: Istanza) -> bool:
     """Fattibilita' della sequenza j+ -> i+ -> j- -> i- (ride time e finestre)."""
     if i == 0 or j == 0:
         return True
-    p_j, p_i = istanza.pickup(j).id, istanza.pickup(i).id # sull'istanza viene chiamato il metodo pickup(j) che restituisce il nodo di pickup dell'utente j, e poi viene preso l'id del nodo
-    d_j, d_i = istanza.delivery(j).id, istanza.delivery(i).id
-    B = _orari_fattibili([p_j, p_i, d_j, d_i], istanza) #B ora contiene i tempi di inizio servizio per ogni nodo della sequenza, se la sequenza e' fattibile, altrimenti None
-    if B is None:
-        return False
-    s_pi = istanza.pickup(i).servizio #viene recuperato il tempo di servizio del nodo di pickup dell'utente i
-    s_pj = istanza.pickup(j).servizio
-    ride_i = B[3] - (B[1] + s_pi)  # il ride time di i è il tempo di fine servizio di i (B[3]) meno il tempo di inizio servizio di i (B[1]) più il tempo di servizio di i (s_pi) al momento del pickup
-    ride_j = B[2] - (B[0] + s_pj)
-    return ride_i <= istanza.L and ride_j <= istanza.L #viene ritornato True se il ride time di i e j e' minore o uguale a L, altrimenti False
+    if _metodo_fattibilita == "esatto":
+        return _f1_esatto(i, j, istanza)
+    return _f1_forward(i, j, istanza)
 
 
-#f2 verifica se la sequenza j+ -> i+ -> i- -> j- e' fattibile, cioe' se il ride time di i e j e' minore o uguale a L
 def f2(i: int, j: int, istanza: Istanza) -> bool:
     """Fattibilita' della sequenza j+ -> i+ -> i- -> j- (ride time e finestre)."""
     if i == 0 or j == 0:
         return True
-    p_j, p_i = istanza.pickup(j).id, istanza.pickup(i).id
-    d_i, d_j = istanza.delivery(i).id, istanza.delivery(j).id
-    B = _orari_fattibili([p_j, p_i, d_i, d_j], istanza) #qua viene creata la famosa sequenza_id che viene poi passata alla funzione _orari_fattibili
-    if B is None:
-        return False
-    s_pi = istanza.pickup(i).servizio
-    s_pj = istanza.pickup(j).servizio
-    ride_i = B[2] - (B[1] + s_pi)
-    ride_j = B[3] - (B[0] + s_pj)
-    return ride_i <= istanza.L and ride_j <= istanza.L
-
-
-
-
-
-
-
-
-
+    if _metodo_fattibilita == "esatto":
+        return _f2_esatto(i, j, istanza)
+    return _f2_forward(i, j, istanza)
 
 
 # ----------------------------------------------------------------------
@@ -147,7 +225,6 @@ def genera_companion_validi(utente: int, tipo: str, istanza: Istanza) -> list[tu
 
     Q = istanza.Q
     capacita_residua = Q - istanza.carico(utente)
-
 
     candidati = []
     for altro in istanza.utenti():
@@ -185,33 +262,17 @@ def crea_nodo(utente: int, tipo: str, compagni: tuple[int, ...], Q: int) -> Nodo
     return (v1,) + resto
 
 
-
-
-
-
 def genera_nodi(istanza: Istanza) -> set[Nodo]:
-
-    """Assembla V = V0 U (unione Vi+) U (unione Vi-), per i in 1..n.
-    l'obbiettivo e' generare tutti i nodi possibili, quindi per ogni utente i 
-    genera tutti i nodi pickup e delivery possibili, 
-    rispettando le condizioni di capacita' e compatibilita' individuale f1/f2."""
-
+    """Assembla V = V0 U (unione Vi+) U (unione Vi-), per i in 1..n."""
     Q = istanza.Q
-    nodi: set[Nodo] = {(0,) * Q}  # creo un insieme di nodi e aggiungo il deposito (0, 0, ..., 0) come primo nodo
+    nodi: set[Nodo] = {(0,) * Q}  # deposito
 
-    for utente in istanza.utenti(): 
+    for utente in istanza.utenti():
         for tipo in ("pickup", "delivery"):
-            for compagni in genera_companion_validi(utente, tipo, istanza): # genera_companion_validi() ritorna una lista di tuple, dove ogni tupla rappresenta un insieme di compagni validi per l'utente e il tipo di evento (pickup o delivery)
+            for compagni in genera_companion_validi(utente, tipo, istanza):
                 nodi.add(crea_nodo(utente, tipo, compagni, Q))
 
     return nodi
-
-
-
-
-
-
-
 
 
 # ----------------------------------------------------------------------
@@ -336,13 +397,6 @@ def costo_arco(arco: Arco, istanza: Istanza) -> float:
 tempo_arco = costo_arco
 
 
-
-
-
-
-
-
-
 # ----------------------------------------------------------------------
 # Contenitore del grafo
 # ----------------------------------------------------------------------
@@ -361,14 +415,14 @@ class Grafo:
         g = cls(istanza=istanza, nodi=genera_nodi(istanza))
         g.archi = genera_archi(g)
         g._costruisci_adiacenze()
-        return g #g sarebbe un oggetto della classe grafo
+        return g
 
-    def _costruisci_adiacenze(self) -> None: #serve a costruire le liste di adiacenza delta_out e delta_in per ogni nodo del grafo
-        self.delta_out = {v: [] for v in self.nodi} # 
+    def _costruisci_adiacenze(self) -> None:
+        self.delta_out = {v: [] for v in self.nodi}
         self.delta_in = {v: [] for v in self.nodi}
-        for arco in self.archi: # per ogni arco del grafo
-            v, w = arco # v = nodo di partenza, w = nodo di arrivo
-            self.delta_out[v].append(arco) # v viene aggiunto alla lista delta_out del nodo v, quindi delta_out[v] contiene tutti gli archi in uscita da v
+        for arco in self.archi:
+            v, w = arco
+            self.delta_out[v].append(arco)
             self.delta_in[w].append(arco)
 
     # ------------------------------------------------------------------
@@ -388,9 +442,6 @@ class Grafo:
 
     def tempo(self, arco: Arco) -> float:
         return tempo_arco(arco, self.istanza)
-
-
-
 
 
 if __name__ == "__main__":
