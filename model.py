@@ -174,7 +174,7 @@ def finestre_nodi(grafo: Grafo, coda: dict[Nodo, int] | None = None) -> dict[Nod
     istanza = grafo.istanza
 
     if coda is None:
-        coda, _ = mappa_localita(grafo)  # se coda è vuota allora grazie alla funzione
+        coda, _ = mappa_localita(grafo)  # se la mappa non e' stata passata, la calcoliamo qui
 
     deposito = grafo.deposito()
     lb_dep, ub_dep = finestra_deposito(istanza)
@@ -311,9 +311,17 @@ def costruisci_modello(
         # restituisce OPTIMAL con valore 0. Il flag serve esattamente a
         # impedire che quel risultato passi per buono.
         m._richiede_obiettivo = True
+        m._obiettivo = None
+        m._coefficienti = None
     else:
         m.setObjective(gp.quicksum(costo[a] * x[a] for a in archi), GRB.MINIMIZE)
         m._richiede_obiettivo = False
+        # Stesso formato di objectives.imposta_somma_pesata: tutti e quattro i
+        # criteri, quelli assenti con peso zero. Cosi' results.py tratta allo
+        # stesso modo un modello di default e uno passato da objectives.py.
+        m._obiettivo = "fc"
+        m._coefficienti = {"costo": 1.0, "regret": 0.0,
+                           "regret_max": 0.0, "rifiuti": 0.0}
 
     # --- stato appeso al modello, per objectives.py e results.py ------
     m._grafo = grafo
@@ -324,6 +332,7 @@ def costruisci_modello(
     m._p = p
     m._d = None
     m._dmax = None
+    m._livelli = []       # vincoli di livello (criterio, vincolo), vedi objectives.py
     m._nodi = nodi
     m._archi = archi
     m._deposito = deposito
