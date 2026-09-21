@@ -69,25 +69,40 @@ def metodo_fattibilita() -> str:
 
 # --- implementazione esatta (default) ---------------------------------
 
-def _esiste_schedule(sequenza_id: list[int],
-                     vincoli_ride: list[tuple[int, int]],
-                     istanza: Istanza) -> bool:
+def schedule_minimo(sequenza_id: list[int],
+                    vincoli_ride: list[tuple[int, int]],
+                    istanza: Istanza,
+                    tempi: list[float] | None = None) -> list[float] | None:
     """
-    Esiste un'assegnazione di tempi di inizio servizio B ammissibile lungo la
-    sequenza data? Questa e' la domanda che il paper pone con f1/f2.
+    Schedule minimo lungo la sequenza di localita' data: per ogni posizione k
+    il piu' piccolo istante di inizio servizio B_k compatibile con finestre,
+    tempi di viaggio e ride time. None se nessuno schedule e' ammissibile.
 
     Tutti i vincoli in gioco hanno la forma B_u - B_v <= c:
         B_k >= e_k                      ->  B_rif - B_k <= -e_k
         B_k <= l_k                      ->  B_k - B_rif <=  l_k
-        B_{k+1} >= B_k + s_k + t        ->  B_k - B_{k+1} <= -(s_k + t)
+        B_{k+1} >= B_k + s_k + t_k      ->  B_k - B_{k+1} <= -(s_k + t_k)
         B_d - B_p <= L + s_p            ->  gia' in forma
     Un sistema di vincoli di differenza e' ammissibile se e solo se il suo
-    grafo dei vincoli non contiene cicli negativi (Bellman-Ford).
+    grafo dei vincoli non contiene cicli negativi (Bellman-Ford). Al punto
+    fisso, B = -dist e' una soluzione, ed e' la piu' piccola: partendo da
+    dist = 0, ogni distanza viene abbassata solo quanto strettamente serve.
 
     vincoli_ride: coppie (posizione del pickup, posizione della delivery)
-    nella sequenza, una per ogni utente il cui ride time va limitato.
+        nella sequenza, una per ogni utente il cui ride time va limitato.
+    tempi: tempi di percorrenza fra posizioni consecutive (lunghezza n-1).
+        None -> si usano le distanze dell'istanza (costo == tempo, benchmark
+        Cordeau). Per le rotte estratte dal modello passare i tempi degli
+        archi (m._tempo): restano corretti anche quando costo e tempo
+        differiscono (istanze OSM).
     """
     n = len(sequenza_id)
+    if tempi is None:
+        tempi = [istanza.distanza(sequenza_id[k], sequenza_id[k + 1])
+                 for k in range(n - 1)]
+    elif len(tempi) != n - 1:
+        raise ValueError(f"servono {n - 1} tempi di percorrenza, ricevuti {len(tempi)}")
+
     RIF = n                                   # nodo di riferimento, B_RIF = 0
     archi: list[tuple[int, int, float]] = []   # (u, v, peso) <=> B_u - B_v <= peso
 
@@ -98,8 +113,7 @@ def _esiste_schedule(sequenza_id: list[int],
 
     for k in range(n - 1):
         nodo = istanza.nodo(sequenza_id[k])
-        tratta = istanza.distanza(sequenza_id[k], sequenza_id[k + 1])
-        archi.append((k, k + 1, -(nodo.servizio + tratta)))
+        archi.append((k, k + 1, -(nodo.servizio + tempi[k])))
 
     for pos_p, pos_d in vincoli_ride:
         s_p = istanza.nodo(sequenza_id[pos_p]).servizio
@@ -113,8 +127,16 @@ def _esiste_schedule(sequenza_id: list[int],
                 dist[v] = dist[u] + peso
                 aggiornato = True
         if not aggiornato:
-            return True          # punto fisso raggiunto: nessun ciclo negativo
-    return False                 # ancora in aggiornamento dopo |V| passate
+            # punto fisso raggiunto: nessun ciclo negativo
+            return [dist[RIF] - dist[k] for k in range(n)]
+    return None                  # ancora in aggiornamento dopo n+1 passate
+
+
+def _esiste_schedule(sequenza_id: list[int],
+                     vincoli_ride: list[tuple[int, int]],
+                     istanza: Istanza) -> bool:
+    """Esiste uno schedule ammissibile? E' la domanda che il paper pone con f1/f2."""
+    return schedule_minimo(sequenza_id, vincoli_ride, istanza) is not None
 
 
 def _f1_esatto(i: int, j: int, istanza: Istanza) -> bool:
