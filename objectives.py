@@ -456,22 +456,11 @@ if __name__ == "__main__":
     from instances import leggi_istanza
     from model import VARIANTI
 
-    # Valori ottimi calcolati durante l'analisi con HiGHS (analisi_funzioni_obiettivo.md,
-    # par. 5). I valori ottimi non dipendono dal solver: con Gurobi devono ricomparire
-    # entro ~1e-3. Solo dopo questo controllo diventano assert in test.py.
-    RIFERIMENTO_HIGHS = {
-        "a2-16": {"fc": 294.2480, "fn": 0.0, "fr": 14.1864, "frmax": 5.5939,
-                  "fcr": 330.2431, "fcrmax": 329.9129, "frcr": 267.7970},
-        "a3-24": {"fc": 344.8336, "fn": 0.0, "fr": 8.1950, "frmax": 4.9672,
-                  "fcr": 382.7216, "fcrmax": 390.7776, "frcr": 328.1593},
-        "b2-16": {"fc": 309.4057, "fn": 0.0, "fr": 10.7556, "frmax": 5.4985,
-                  "fcr": 338.1290, "fcrmax": 343.8774, "frcr": 283.6275},
-    }
-
     def criteri_grezzi(m: gp.Model) -> dict[str, float]:
         """
         Criteri calcolati dai valori restituiti dal solver (colonna "grezza").
-        Solo per questa verifica: la versione definitiva vivra' in results.py.
+        Solo per questa verifica rapida: nel progetto la lettura dei risultati e' in
+        results.py.
         """
         istanza = m._istanza
         costo_rotte = sum(m._costo[a] for a in m._archi if m._x[a].X > 0.5)
@@ -483,13 +472,11 @@ if __name__ == "__main__":
                 arrivi[i] = m._B[attivi[0]].X
         return valuta_criteri(istanza, costo_rotte, arrivi)
 
-    percorso = sys.argv[1] if len(sys.argv) > 1 else "a2-16.txt"
+    percorso = sys.argv[1] if len(sys.argv) > 1 else "dati_milp/a2-16.txt"
     istanza = leggi_istanza(percorso)
     grafo = Grafo.costruisci(istanza)
-    riferimento = RIFERIMENTO_HIGHS.get(istanza.nome, {})
     print(f"{istanza.nome}: n = {istanza.n}, pesi del paper = {pesi_paper(istanza.n)}")
-    print(f"{'obiettivo':<9} {'Model I':>11} {'Model II':>11} {'riferim.':>10} "
-          f"{'serviti':>8}  controlli")
+    print(f"{'obiettivo':<9} {'Model I':>11} {'Model II':>11} {'serviti':>8}  controlli")
 
     tutto_ok = True
     for nome in OBIETTIVI:
@@ -515,17 +502,14 @@ if __name__ == "__main__":
             if m._p is not None:
                 serviti = f"{istanza.n - round(criteri['rifiuti'])}/{istanza.n}"
 
-        if None not in valori.values():
-            if abs(valori["I"] - valori["II"]) > 1e-4:
-                controlli.append("Model I e II DIVERSI")
-            if nome in riferimento and abs(valori["II"] - riferimento[nome]) > 1e-3:
-                controlli.append("diverso dal riferimento HiGHS")
+        # Model I e Model II sono equivalenti: devono trovare lo stesso ottimo.
+        if None not in valori.values() and abs(valori["I"] - valori["II"]) > 1e-4:
+            controlli.append("Model I e II DIVERSI")
         tutto_ok = tutto_ok and not controlli
 
         testo = [f"{valori[v]:11.4f}" if valori[v] is not None else f"{'-':>11}"
                  for v in VARIANTI]
-        rif = f"{riferimento[nome]:10.4f}" if nome in riferimento else f"{'-':>10}"
-        print(f"{nome:<9} {testo[0]} {testo[1]} {rif} {serviti:>8}  "
+        print(f"{nome:<9} {testo[0]} {testo[1]} {serviti:>8}  "
               f"{'; '.join(controlli) or 'OK'}")
 
     print("\nTutti i controlli superati." if tutto_ok else "\nCi sono controlli falliti.")
