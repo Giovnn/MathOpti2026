@@ -178,7 +178,7 @@ class Risultato:
         return self.stato == "ottimo"
 
     def riga(self) -> dict:
-        """Dizionario piatto, una riga di CSV (scalability.py)."""
+        """Dizionario piatto con i campi principali del risultato (per esportazioni e tabelle)."""
         c, g = self.canonici, self.grezzi
         return {
             "istanza": self.istanza, "n": self.n, "variante": self.variante,
