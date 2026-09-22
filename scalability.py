@@ -45,7 +45,7 @@ CARTELLA_RISULTATI = CARTELLA / "risultati"
 FILE_CSV = CARTELLA_RISULTATI / "scalability.csv"
 FILE_GRAFICO = CARTELLA_RISULTATI / "scalability.png"
 
-LIMITE_TEMPO = 1800   # secondi per esecuzione (30 minuti)
+LIMITE_TEMPO = 7200   # secondi per esecuzione (30 minuti)
 MIP_GAP = 1e-4        # tolleranza standard dei solver, la stessa di default di CPLEX
                       # (model.py, se non indicato, chiede l'ottimo esatto)
 
