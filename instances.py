@@ -1,31 +1,27 @@
 """
-instances.py — Lettura e rappresentazione delle istanze DARP.
+Lettura e rappresentazione delle istanze DARP: due formati in ingresso, una
+sola rappresentazione (Istanza).
 
-Due formati di ingresso, UNA sola rappresentazione (Istanza):
+Cordeau (.txt, benchmark branch-and-cut):
+    riga 1: K n T Q L
+    righe successive: id x y servizio domanda e l
+    costo = tempo = distanza euclidea; stesso L per tutti gli utenti; per ogni
+    richiesta è data una sola finestra, l'altra si ricostruisce (eq. 5-6).
 
-  Cordeau (.txt, benchmark branch-and-cut)
-      riga 1:  K n T Q L
-      righe successive:  id  x  y  servizio  domanda  e  l
-      costo = tempo = distanza euclidea; stesso L per tutti gli utenti; per ogni
-      richiesta e' data UNA sola finestra, l'altra si ricostruisce (eq. 5-6).
+OSM (.json, generato da osm_city.py):
+    matrice dei costi in km su strada (asimmetrica); tempo = costo * 60 / v;
+    L_i diverso per utente; entrambe le finestre già calcolate; tipo
+    inbound/outbound scritto esplicitamente per ogni richiesta.
 
-  OSM (.json, generato da osm_city.py)
-      matrice dei costi in km su strada (asimmetrica); tempo = costo * 60 / v;
-      L_i diverso per ogni utente; entrambe le finestre gia' calcolate;
-      tipo inbound/outbound scritto esplicitamente per ogni richiesta.
+Il resto del progetto legge costi, tempi e ride time solo con costo(), tempo()
+e ride_max(): non deve sapere da quale formato viene l'istanza.
 
-Costi, tempi e ride time massimi si leggono SOLO con i metodi costo(), tempo()
-e ride_max() di Istanza: il resto del progetto non deve sapere da quale
-formato viene l'istanza.
-
-Convenzione di numerazione dei nodi:
+Numerazione dei nodi (incapsulata in pickup()/delivery()/utente(), il resto
+del progetto non la ricalcola a mano):
     0          deposito iniziale
-    1 .. n     pickup   delle richieste 1..n
-    n+1 .. 2n  delivery delle richieste 1..n  (delivery di i ha id i+n)
+    1 .. n     pickup delle richieste 1..n
+    n+1 .. 2n  delivery delle richieste 1..n (delivery di i ha id i+n)
     2n+1       deposito finale
-
-Questa convenzione e' incapsulata nei metodi pickup()/delivery()/utente() di
-Istanza: il resto del progetto non deve mai ricalcolarla a mano.
 """
 
 from dataclasses import dataclass, field
@@ -82,7 +78,7 @@ class Istanza:
     _tempo: dict[tuple[int, int], float] | None = field(default=None, repr=False)
 
     # indice interno id -> Nodo, costruito automaticamente
-    # privato perche' non vogliamo modificarlo dall'esterno, altrimenti l'indice diverrebbe incoerente
+    # privato: modificarlo da fuori renderebbe l'indice incoerente
     _per_id: dict[int, Nodo] = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
@@ -112,7 +108,7 @@ class Istanza:
             return id_nodo
         if self.n + 1 <= id_nodo <= 2 * self.n:
             return id_nodo - self.n
-        raise ValueError(f"{self.nome}: il nodo {id_nodo} e' un deposito, non appartiene a nessun utente")
+        raise ValueError(f"{self.nome}: il nodo {id_nodo} è un deposito, non appartiene a nessun utente")
 
     def deposito_iniziale(self) -> Nodo:
         return self.nodo(0)
@@ -248,7 +244,7 @@ def leggi_istanza_json(path: str | Path) -> Istanza:
                  e=float(v["e"]), l=float(v["l"]))
             for v in dati["nodi"]]
 
-    # la matrice e' indicizzata per POSIZIONE nella lista dei nodi: la traduco in id
+    # la matrice è indicizzata per posizione nella lista dei nodi: qui la traduco in id
     ids = [nodo.id for nodo in nodi]
     matrice = dati["costo_km"]
     if len(matrice) != len(ids) or any(len(riga) != len(ids) for riga in matrice):
@@ -324,10 +320,10 @@ def _larghezza(nodo: Nodo) -> float:
 
 
 def finestra_derivata(istanza: Istanza, utente: int, tipo: str) -> tuple[float, float]:
-    """Eq. (5)-(6) del paper: la finestra NON data della richiesta, calcolata da quella data.
-
-        inbound  (data la finestra di pickup)   -> restituisce [e_i-, l_i-]   (eq. 5)
-        outbound (data la finestra di drop-off) -> restituisce [e_i+, l_i+]   (eq. 6)
+    """
+    Eq. (5)-(6): la finestra non data della richiesta, calcolata da quella data.
+        inbound  (data la finestra di pickup)   -> [e_i-, l_i-]  (eq. 5)
+        outbound (data la finestra di drop-off) -> [e_i+, l_i+]  (eq. 6)
     """
     dep = istanza.deposito_iniziale()
     p, d = istanza.pickup(utente), istanza.delivery(utente)
@@ -341,14 +337,14 @@ def finestra_derivata(istanza: Istanza, utente: int, tipo: str) -> tuple[float, 
 
 
 def costruisci_finestre_mancanti(istanza: Istanza) -> None:
-    """Formato Cordeau: riconosce il tipo di ogni richiesta e ricostruisce la finestra mancante.
-
-    Per ogni richiesta e' data UNA sola finestra, di lunghezza fissa TW; l'altra e' un
-    segnaposto ampio. La finestra stretta e' quella reale:
-        pickup piu' stretta   -> inbound  -> si deriva la finestra di drop-off (eq. 5)
-        drop-off piu' stretta -> outbound -> si deriva la finestra di pickup   (eq. 6)
-    Il tipo riconosciuto viene registrato in istanza.tipo: DOPO la ricostruzione il
-    confronto delle ampiezze non e' piu' affidabile (lo tronca l'orizzonte del deposito).
+    """
+    Formato Cordeau: riconosce il tipo di ogni richiesta e ricostruisce la finestra
+    mancante. Per ogni richiesta è data una sola finestra, di lunghezza fissa TW;
+    l'altra è un segnaposto ampio. La finestra stretta è quella reale:
+        pickup più stretta   -> inbound  -> si deriva la finestra di drop-off (eq. 5)
+        drop-off più stretta -> outbound -> si deriva la finestra di pickup   (eq. 6)
+    Il tipo va registrato in istanza.tipo prima di derivare la finestra, perché dopo
+    il confronto fra ampiezze non è più affidabile (lo tronca l'orizzonte del deposito).
     """
     for i in istanza.utenti():
         p, d = istanza.pickup(i), istanza.delivery(i)
@@ -365,8 +361,10 @@ def costruisci_finestre_mancanti(istanza: Istanza) -> None:
 
 
 def verifica_finestre_derivate(istanza: Istanza, tolleranza: float = TOLLERANZA_FINESTRE) -> None:
-    """Formato OSM: le finestre sono gia' complete. Controlla che la finestra derivata
-    coincida con l'eq. (5)/(6) ricalcolata con i tempi e gli L_i letti dal file."""
+    """
+    Formato OSM: le finestre sono già complete. Controlla che la finestra derivata
+    coincida con l'eq. (5)/(6) ricalcolata con i tempi e gli L_i del file.
+    """
     for i in istanza.utenti():
         tipo = istanza.tipo_richiesta(i)
         e_atteso, l_atteso = finestra_derivata(istanza, i, tipo)

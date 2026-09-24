@@ -1,18 +1,14 @@
 """
-results.py — Risoluzione dei modelli e lettura dei risultati.
+Risoluzione dei modelli e lettura dei risultati: stato del solver, valore, bound,
+gap, tempi, rotte dei veicoli e i quattro criteri.
 
-Riceve un modello gia' costruito (model.py, eventualmente con l'obiettivo impostato da
-objectives.py), lo risolve e ne ricava tutto cio' che serve a test, tabelle e relazione:
-stato del solver, valore, bound, gap, tempi, rotte dei veicoli e i quattro criteri.
-
-I criteri che dipendono dagli orari (regret, regret massimo) sono calcolati in due modi:
-  - canonico: sullo schedule MINIMO di ogni rotta (graph.schedule_minimo). Dipende solo
-    dalle rotte, quindi e' riproducibile e confrontabile fra solver. E' quello da
-    riportare nelle tabelle.
-  - grezzo: dai B.X restituiti dal solver. Quando il regret non e' nell'obiettivo i B.X
-    sono arbitrari (analisi_funzioni_obiettivo.md, par. 3.1): serve solo per mostrarlo.
-Vale sempre canonico <= grezzo, perche' lo schedule minimo anticipa ogni evento quanto
-possibile.
+Regret e regret massimo sono calcolati in due modi:
+  - canonico: sullo schedule minimo di ogni rotta (graph.schedule_minimo). Dipende
+    solo dalle rotte, quindi è riproducibile; è il valore riportato nelle tabelle.
+  - grezzo: dai B.X del solver. Se il regret non è nell'obiettivo, i B.X possono
+    assumere qualunque valore ammissibile, quindi il dato è solo indicativo.
+Il canonico è sempre <= del grezzo, perché lo schedule minimo anticipa ogni evento
+il più possibile.
 """
 
 from dataclasses import dataclass, field
@@ -30,7 +26,7 @@ TOL = 1e-6
 
 
 # ----------------------------------------------------------------------
-# Blocco 1 — Stato del solver
+# Stato del solver
 # ----------------------------------------------------------------------
 
 _NOMI_STATO = {
@@ -48,16 +44,15 @@ def nome_stato(codice: int) -> str:
 
 
 # ----------------------------------------------------------------------
-# Blocco 2 — Rotte
+# Rotte
 # ----------------------------------------------------------------------
 
 @dataclass
 class Rotta:
     """
-    Il giro di un veicolo, dal deposito al deposito.
-
-    nodi, localita e schedule hanno la stessa lunghezza e lo stesso indice: la posizione
-    k e' il k-esimo evento della rotta. archi e tempi hanno un elemento in meno.
+    Giro di un veicolo dal deposito al deposito.
+    nodi, localita e schedule sono allineati per posizione; archi e tempi hanno
+    un elemento in meno.
     """
     archi: list[Arco]
     nodi: list[Nodo]              # [deposito, v1, ..., vk, deposito]
@@ -83,11 +78,10 @@ class Rotta:
 
 
 def _costruisci_rotta(m: gp.Model, archi: list[Arco]) -> Rotta:
-    """Completa una rotta a partire dai suoi archi, schedule minimo compreso."""
+    """Costruisce la Rotta dai suoi archi e ne calcola lo schedule minimo."""
     istanza = m._istanza
     nodi = [a[0] for a in archi] + [archi[-1][1]]
-    # coda e testa differiscono solo sul deposito: primo nodo = deposito iniziale,
-    # ultimo nodo = deposito finale. Per i nodi intermedi coincidono.
+    # coda e testa coincidono tranne che per il deposito (primo e ultimo nodo)
     localita = [m._coda[a[0]] for a in archi] + [m._testa[archi[-1][1]]]
     tempi = [m._tempo[a] for a in archi]
     costo = sum(m._costo[a] for a in archi)
@@ -112,12 +106,10 @@ def _costruisci_rotta(m: gp.Model, archi: list[Arco]) -> Rotta:
 
 def estrai_rotte(m: gp.Model) -> list[Rotta]:
     """
-    Ricostruisce le rotte dagli archi con x_a = 1.
-
-    Ogni nodo diverso dal deposito ha al piu' un arco uscente attivo (ogni evento
-    avviene una volta sola), quindi da ogni partenza dal deposito si segue la catena
-    fino al rientro. Se avanzano archi, il solver ha restituito un sottociclo: con
-    tempi di servizio positivi e' impossibile, quindi e' un errore da segnalare.
+    Ricostruisce le rotte dagli archi con x_a = 1. Ogni nodo diverso dal deposito ha
+    al più un arco uscente attivo, quindi da ogni partenza si segue la catena fino al
+    rientro. Archi avanzati indicherebbero un sottociclo, impossibile con tempi di
+    servizio positivi.
     """
     deposito = m._deposito
     attivi = [a for a in m._archi if m._x[a].X > 0.5]
@@ -148,7 +140,7 @@ def estrai_rotte(m: gp.Model) -> list[Rotta]:
 
 
 # ----------------------------------------------------------------------
-# Blocco 3 — Il risultato di una risoluzione
+# Risultato di una risoluzione
 # ----------------------------------------------------------------------
 
 @dataclass
@@ -178,7 +170,7 @@ class Risultato:
         return self.stato == "ottimo"
 
     def riga(self) -> dict:
-        """Dizionario piatto con i campi principali del risultato (per esportazioni e tabelle)."""
+        """Campi principali del risultato come dizionario: una riga del CSV di esperimenti.py."""
         c, g = self.canonici, self.grezzi
         return {
             "istanza": self.istanza, "n": self.n, "variante": self.variante,
@@ -227,7 +219,7 @@ def risolvi(m: gp.Model) -> Risultato:
 
 
 # ----------------------------------------------------------------------
-# Blocco 4 — Controlli di coerenza (usati da test.py)
+# Controlli di coerenza (usati da test.py)
 # ----------------------------------------------------------------------
 
 def _vicini(a: float, b: float) -> bool:
@@ -236,23 +228,18 @@ def _vicini(a: float, b: float) -> bool:
 
 def controlli(r: Risultato) -> list[str]:
     """
-    Controlli che non richiedono valori di riferimento. Lista vuota = tutto coerente.
-
-    Sempre:
-      - regret canonico <= regret grezzo, a meno delle tolleranze del solver (lo
-        schedule minimo non puo' essere peggiore);
-    Solo all'ottimo dimostrato con gap nullo, perche' fuori dall'ottimo le variabili
-    ausiliarie possono avere "gioco" e i valori letti non sono piu' vincolati:
-      - T5: l'obiettivo ricalcolato dai criteri coincide con ObjVal;
-      - T3: se il regret e' nell'obiettivo, somma d_i.X = regret canonico.
+    Controlli di coerenza che non richiedono valori di riferimento (lista vuota se è
+    tutto a posto). Sempre: regret canonico <= regret grezzo, entro le tolleranze.
+    Solo all'ottimo con gap nullo, dove le variabili ausiliarie non hanno più margine:
+    l'obiettivo ricalcolato dai criteri deve coincidere con ObjVal e, se il regret è
+    nell'obiettivo, la somma delle d_i deve coincidere con il regret canonico.
     """
     problemi = []
     if not r.ha_soluzione:
         return problemi
 
-    # I B.X rispettano i vincoli solo entro la tolleranza di ammissibilita' del solver
-    # (FeasibilityTol, 1e-6 di default): possono stare di poco SOTTO lo schedule
-    # minimo esatto. Margine: 1e-5 per utente.
+    # i B.X rispettano i vincoli solo entro FeasibilityTol (1e-6), quindi possono
+    # stare di poco sotto lo schedule minimo: margine di 1e-5 per utente
     margine = 1e-5 * max(1, r.n)
     if r.canonici["regret"] > r.grezzi["regret"] + margine:
         problemi.append(f"regret canonico {r.canonici['regret']:.6f} maggiore del "
@@ -261,19 +248,19 @@ def controlli(r: Risultato) -> list[str]:
     if r.ottimo and r.gap is not None and r.gap <= 1e-8:
         ricalcolato = valore_obiettivo(r.coefficienti, r.grezzi)
         if not _vicini(ricalcolato, r.obj):
-            problemi.append(f"T5: obiettivo ricalcolato {ricalcolato:.6f} != {r.obj:.6f}")
+            problemi.append(f"obiettivo ricalcolato {ricalcolato:.6f} != {r.obj:.6f}")
         if r.somma_d is not None and r.coefficienti.get("regret", 0) > 0:
             if not _vicini(r.somma_d, r.canonici["regret"]):
-                problemi.append(f"T3: somma d_i {r.somma_d:.6f} != regret canonico "
+                problemi.append(f"somma d_i {r.somma_d:.6f} != regret canonico "
                                 f"{r.canonici['regret']:.6f}")
     return problemi
 
 
 # ----------------------------------------------------------------------
-# Blocco 5 — Lessicografico in due fasi
+# Lessicografico in due fasi
 # ----------------------------------------------------------------------
 
-# Obiettivo "puro" -> criterio da congelare nella seconda fase.
+# obiettivo puro -> criterio da vincolare nella seconda fase
 CRITERIO_PRIMARIO = {"fr": "regret", "frmax": "regret_max", "fn": "rifiuti"}
 
 
@@ -281,12 +268,9 @@ def risolvi_lessicografico(grafo: Grafo, primario: str, secondario: str = "fc", 
                            pesi: Pesi | None = None,
                            **opzioni_modello) -> tuple[Risultato, Risultato | None]:
     """
-    Prima fase: ottimizza l'obiettivo puro `primario` e ne ricava il valore ottimo f*.
-    Seconda fase: sullo stesso modello aggiunge  criterio <= f* (con tolleranza) e
-    ottimizza `secondario`. Risultato: la soluzione migliore per `secondario` fra quelle
-    ottime per `primario` (su a2-16, fr poi fc: costo 317.946).
-
-    Se la prima fase non raggiunge l'ottimo, la seconda non ha senso: restituisce None.
+    Prima fase: ottimizza l'obiettivo puro `primario`. Seconda fase: vincola quel
+    criterio al valore trovato (con tolleranza) e ottimizza `secondario`.
+    Se la prima fase non arriva all'ottimo, la seconda restituisce None.
     """
     if primario not in CRITERIO_PRIMARIO:
         raise ValueError(f"primario deve essere un obiettivo puro: "
@@ -306,7 +290,7 @@ def risolvi_lessicografico(grafo: Grafo, primario: str, secondario: str = "fc", 
 
 
 # ----------------------------------------------------------------------
-# Blocco 6 — Stampa leggibile
+# Stampa
 # ----------------------------------------------------------------------
 
 def descrivi(r: Risultato) -> str:

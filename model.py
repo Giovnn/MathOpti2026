@@ -1,32 +1,20 @@
 """
-model.py — I due modelli MILP event-based per il DARP (Model I e Model II).
+I due modelli MILP event-based per il DARP, Model I e Model II
+(Gaul, Klamroth & Stiglmayr 2022, Sez. 3.2-3.4). L'obiettivo di default è il
+costo f_c (eq. 10); le altre funzioni obiettivo sono in objectives.py.
 
-Riferimento: Gaul, Klamroth & Stiglmayr (2022), EJOR 301(3), Sez. 3.2-3.4.
+Alcuni vincoli del DARP non compaiono come righe del modello:
+  - capacità: solo le Q-tuple ammissibili diventano nodi;
+  - pairing e precedenza: sono nella struttura degli archi A1-A6;
+  - coppie incompatibili: eliminate da f1/f2 in graph.py;
+  - sottotour: esclusi da (2b)/(9b), perché sommando B_w >= B_v + s + t lungo un
+    ciclo si ottiene 0 >= somma(s + t), impossibile se un tempo è positivo.
+    Per questo l'Esempio 1 del paper (s = t = 0) serve a verificare il grafo, non il MILP.
 
-Questo modulo costruisce la STRUTTURA del problema e nient'altro:
-variabili x e B, conservazione del flusso, copertura delle richieste, numero di
-veicoli, propagazione dei tempi, finestre temporali, ride time. L'obiettivo di
-default e' il costo di routing f_c (eq. 10); le altre sei funzioni obiettivo
-del paper vivono in objectives.py, la risoluzione e l'estrazione dei risultati
-in results.py.
-
-Cosa NON c'e' qui, e perche':
-  - capacita' del veicolo      -> nella definizione dei nodi (Q-tuple ammissibili)
-  - pairing e precedenza       -> nella struttura degli archi A1-A6
-  - coppie incompatibili       -> preprocessing f1/f2 in graph.py
-  - eliminazione dei sottotour -> implicita nei vincoli temporali (2b)/(9b):
-        sommando B_w >= B_v + s + t lungo un ciclo si ottiene 0 >= somma(s+t),
-        impossibile appena un tempo di servizio o di viaggio e' positivo.
-        ATTENZIONE: nell'Esempio 1 del paper s = t = 0, quindi quell'istanza
-        NON e' utilizzabile per validare il MILP (lo e' solo per il grafo).
-  - durata massima T del servizio -> e' il bound superiore di B_0 (vedi sotto).
-
-Il deposito e' un unico nodo (0,...,0), quindi esiste una sola variabile B_0.
-Il paper esclude gli archi USCENTI dal deposito da (2b)/(9b) e li sostituisce
-con (2c)/(9c), che usano la costante e_0 al posto di B_0. Gli archi ENTRANTI
-restano in (2b)/(9b): di conseguenza B_0 e' l'istante di rientro dell'ultimo
-veicolo (il makespan) e il suo bound superiore impone la durata massima del
-servizio. Non serve un vincolo separato per T.
+Il deposito è un solo nodo con una sola variabile B_0. Gli archi uscenti dal
+deposito usano e_0 al posto di B_0, (2c)/(9c); quelli entranti restano in (2b)/(9b),
+quindi B_0 è l'istante di rientro dell'ultimo veicolo e il suo bound superiore
+impone la durata massima T del servizio.
 """
 
 import gurobipy as gp
@@ -48,15 +36,8 @@ VARIANTI = ("I", "II")
 
 def etichetta(nodo: Nodo) -> str:
     """
-    Nome ASCII di un nodo, utilizzabile dentro i nomi delle variabili Gurobi.
-
-    Il segno meno non e' un carattere sicuro nel formato LP, quindi le
-    componenti negative diventano 'm': (-2, 1, 0) -> 'm2_1_0'.
-    il formato LP è un formato testuale per la rappresentazione dei modelli di programmazione lineare,
-    e alcuni caratteri speciali possono causare problemi durante la lettura del file da parte di Gurobi o altri solver.
-    Per evitare questi problemi, le componenti negative dei nodi vengono sostituite con 'm' (per "minus") nel nome della variabile.
-    Ad esempio, un nodo con coordinate (-2, 1, 0) sarà rappresentato come 'm2_1_0',
-    garantendo che il nome sia sicuro e leggibile all'interno del modello.
+    Nome del nodo per variabili e vincoli, es. (-2, 1, 0) -> 'm2_1_0'
+    (il segno meno non è ammesso nei nomi del formato LP).
     """
     return "_".join(f"m{-c}" if c < 0 else str(c) for c in nodo)
 
@@ -72,12 +53,9 @@ def etichetta_arco(arco: Arco) -> str:
 
 def mappa_localita(grafo: Grafo) -> tuple[dict[Nodo, int], dict[Nodo, int]]:
     """
-    Per ogni nodo evento, l'id della localita' fisica associata, in due versioni.
-
-    Il deposito e' l'unico nodo ambiguo: nel formato Cordeau ha due id fisici
-    (0 iniziale, 2n+1 finale). `coda` va usata quando il nodo e' l'origine di un
-    arco, `testa` quando ne e' la destinazione. Per tutti gli altri nodi le due
-    mappe coincidono.
+    Id della località fisica di ogni nodo, in due mappe: coda (nodo come origine di
+    un arco) e testa (nodo come destinazione). Differiscono solo sul deposito, che
+    ha due id fisici (0 iniziale, 2n+1 finale).
     """
     istanza = grafo.istanza
     coda = {v: localita_id(v, istanza, is_partenza=True) for v in grafo.nodi}
@@ -87,18 +65,10 @@ def mappa_localita(grafo: Grafo) -> tuple[dict[Nodo, int], dict[Nodo, int]]:
 
 def calcola_M_ride(istanza: Istanza) -> dict[int, float]:
     """
-    M_i = l_i- - e_i+ - s_i+ - L_i, troncato a zero.  (paper, Sez. 3.3)
-
-    E' il big-M dei vincoli di ride time del Model I (2e) ED e' il coefficiente
-    delle finestre riformulate del Model II (9e)/(9f): il paper lo chiama TW nel
-    secondo caso, ma le due quantita' coincidono quando le finestre mancanti
-    sono generate dalle eq. (5)-(6). Calcolarlo dalle finestre effettive invece
-    di leggere TW rende la formula valida anche quando le finestre sono state
-    strette da un preprocessing (sulle istanze b4-40 e b8-80 il taglio
-    sull'orizzonte del deposito rende M_i < TW: e' corretto e piu' stretto).
-
-    M_i < 0 significa che la richiesta i e' infeasible in se': la finestra di
-    drop-off si chiude prima di quanto il ride time massimo consenta.
+    M_i = l_i- - e_i+ - s_i+ - L_i (Sez. 3.3): big-M del ride time nel Model I (2e) e
+    coefficiente delle finestre riformulate del Model II (9e)/(9f), dove il paper lo
+    chiama TW. Si calcola dalle finestre effettive, così resta valido anche quando il
+    preprocessing le ha strette. Se è negativo, la richiesta è infeasible in sé.
     """
     M: dict[int, float] = {}
     for i in istanza.utenti():
@@ -118,15 +88,8 @@ def calcola_M_tilde(grafo: Grafo,
                     coda: dict[Nodo, int] | None = None,
                     testa: dict[Nodo, int] | None = None) -> dict[Arco, float]:
     """
-    M~_(v,w) = l_v1 + s_v1 + t_(v,w) - e_w1, troncato a zero.  (paper, Sez. 3.3)
-
-    E' il piu' piccolo valore che rende (2b) ridondante quando l'arco non e'
-    usato: caso peggiore B_v = l_v1 (massimo) e B_w = e_w1 (minimo). Il piu'
-    piccolo M valido da' il rilassamento lineare piu' stretto.
-
-    Il troncamento non e' cosmetico: se l_v1 + s + t <= e_w1 il vincolo e'
-    sempre soddisfatto e un M~ negativo lo renderebbe attivo anche ad arco
-    spento, tagliando soluzioni ammissibili.
+    Big-M dei vincoli (2b)/(9b), Sez. 3.3: M~ = l_v + s_v + t_(v,w) - e_w, il più piccolo
+    valore che disattiva il vincolo ad arco spento (caso peggiore B_v = l_v, B_w = e_w).
     """
     istanza = grafo.istanza
     if coda is None or testa is None:
@@ -137,19 +100,15 @@ def calcola_M_tilde(grafo: Grafo,
         v, w = arco
         nodo_v = istanza.nodo(coda[v])
         nodo_w = istanza.nodo(testa[w])
+        # se è negativo il vincolo è già inattivo: un M negativo taglierebbe soluzioni ammissibili
         M[arco] = max(0.0, nodo_v.l + nodo_v.servizio + grafo.tempo(arco) - nodo_w.e)
     return M
 
 
 def finestra_deposito(istanza: Istanza) -> tuple[float, float]:
     """
-    Finestra della singola variabile B_0.
-
-    B_0 e' contemporaneamente il nodo sorgente e il nodo pozzo del grafo, mentre
-    nel file Cordeau i due depositi sono nodi distinti. Il bound corretto e'
-    l'intersezione delle due finestre: nei benchmark sono entrambe [0, T] e
-    l'intersezione non cambia nulla, ma per le istanze Trieste (deposito con
-    orario di apertura) non e' detto.
+    Finestra di B_0: intersezione delle finestre dei due depositi del file. Nei Cordeau
+    sono entrambe [0, T]; nelle istanze Trieste possono essere diverse.
     """
     iniziale, finale = istanza.deposito_iniziale(), istanza.deposito_finale()
     lb, ub = max(iniziale.e, finale.e), min(iniziale.l, finale.l)
@@ -163,12 +122,8 @@ def finestra_deposito(istanza: Istanza) -> tuple[float, float]:
 
 def finestre_nodi(grafo: Grafo, coda: dict[Nodo, int] | None = None) -> dict[Nodo, tuple[float, float]]:
     """
-    Bound [e_j, l_j] di ogni variabile B_v, con j la localita' fisica di v.
-    "Il servizio deve iniziare tra e_j e l_j" (paper, Sez. 3.4).
-    Corrisponde a (2d) per il Model I e alla parte "bound" di (9d)-(9f) per il
-    Model II: le finestre non sono righe della matrice, sono lb/ub delle
-    variabili. Le due varianti condividono questi bound; il Model II aggiunge
-    poi le righe (9e)/(9f) che stringono il lato libero sui nodi inattivi.
+    Bound [e_j, l_j] di ogni B_v, con j la località fisica di v: vincoli (2d) del Model I
+    e parte di (9d)-(9f) del Model II, messi come lb/ub delle variabili e non come righe.
     """
 
     istanza = grafo.istanza
@@ -206,49 +161,27 @@ def costruisci_modello(
         nome: str | None = None,
 ) -> gp.Model:
     """
-    Costruisce il MILP event-based, variante "I" o "II", con obiettivo f_c.
+    Costruisce il MILP event-based con obiettivo f_c.
 
-    variante:
-        "I"  -> ride time linearizzati con big-M, eq. (2e). Famiglia O(n^(2Q-1))
-                di vincoli, ciascuno contenente DUE somme di archi.
-        "II" -> ride time in forma pulita, eq. (9g), resi innocui sui nodi
-                inattivi dalle finestre riformulate (9e)/(9f). Stesso numero di
-                righe, ma le somme di archi restano solo nella famiglia O(n^Q)
-                delle finestre: matrice molto piu' rada e meno big-M, quindi
-                rilassamento lineare migliore.
+    variante "I": ride time con big-M, eq. (2e); ogni riga contiene due somme di archi.
+    variante "II": ride time senza big-M, eq. (9g), reso innocuo sui nodi non usati
+    dalle finestre (9e)/(9f). Le somme di archi restano solo in (9e)/(9f): matrice più
+    rada e rilassamento lineare migliore.
 
-    consenti_rifiuti:
-        False -> (1c): ogni richiesta e' servita. E' il caso delle Tabelle 5 e 6
-                 del paper. Il modello riceve l'obiettivo f_c ed e' risolvibile
-                 cosi' com'e'.
-        True  -> (3): introduce p_i binaria, la richiesta i e' servita se
-                 p_i = 1. In questo caso il modello NON riceve alcun obiettivo e
-                 viene marcato con m._richiede_obiettivo = True: con f_c
-                 l'ottimo sarebbe la soluzione vuota a costo zero. Sta a
-                 objectives.py impostare un obiettivo che penalizzi i rifiuti
-                 (f_rcr) e azzerare il flag; results.py rifiuta di risolvere un
-                 modello con il flag ancora alzato.
+    consenti_rifiuti=False usa (1c), ogni richiesta è servita (Tabelle 5 e 6).
+    consenti_rifiuti=True usa (3) con le p_i e non imposta l'obiettivo, perché con f_c
+    l'ottimo sarebbe non servire nessuno: il modello viene marcato con
+    m._richiede_obiettivo e l'obiettivo va impostato con objectives.py.
 
-    grado_entrante_unitario:
-        Aggiunge somma(x su delta_in(v)) <= 1 per ogni nodo diverso dal
-        deposito. E' una disuguaglianza valida: non cambia l'insieme delle
-        soluzioni intere (quindi i valori ottimi restano confrontabili con le
-        tabelle pubblicate), ma stringe il rilassamento lineare. Disattivata di
-        default, cosi' il modello di riferimento resta quello del paper.
-
-    mip_gap:
-        0.0 di default, NON il default di Gurobi (1e-4 relativo). Con il gap di
-        Gurobi il solver puo' fermarsi sopra l'ottimo vero e dichiarare
-        "risolto": i valori non sarebbero confrontabili con le Tabelle 5 e 6.
+    mip_gap è 0 di default (Gurobi usa 1e-4), per avere ottimi confrontabili con il paper.
     """
     if variante not in VARIANTI:
         raise ValueError(f"variante non valida: {variante!r} (attese {VARIANTI})")
 
     istanza = grafo.istanza
 
-    # Ordinamento deterministico: l'ordine di creazione delle variabili cambia
-    # il percorso di branch & bound, e quindi i tempi. Senza questo, confrontare
-    # Model I e Model II sarebbe confrontare anche due ordinamenti diversi.
+    # l'ordine di creazione delle variabili cambia il branch-and-bound: lo fissiamo,
+    # così Model I e Model II si confrontano a parità di ordinamento
     nodi = sorted(grafo.nodi)
     archi = sorted(grafo.archi)
     deposito = grafo.deposito()
@@ -269,9 +202,8 @@ def costruisci_modello(
         m.Params.Threads = threads
 
     # --- variabili ----------------------------------------------------
-    # Dizionari semplici, non tupledict: le chiavi sono tuple annidate
-    # (un arco e' una coppia di Q-tuple) e l'indicizzazione multidimensionale
-    # di gurobipy su chiavi del genere e' ambigua.
+    # dizionari normali e non tupledict: le chiavi sono tuple di tuple, che gurobipy
+    # interpreterebbe come indici multidimensionali
     x = {a: m.addVar(vtype=GRB.BINARY, name=f"x[{etichetta_arco(a)}]") for a in archi}
 
     B = {}
@@ -286,8 +218,7 @@ def costruisci_modello(
     m.update()
 
     # --- cache delle somme di flusso ----------------------------------
-    # somma(x su delta_in(v)) compare in (1b), (1c), (2e), (9e), (9f).
-    # Ricostruirla dentro i cicli e' il collo di bottiglia della costruzione.
+    # somma(x su delta_in(v)) serve in (1b), (1c), (2e), (9e), (9f): la calcoliamo una volta sola
     flusso_in = {v: gp.quicksum(x[a] for a in grafo.delta_in[v]) for v in nodi}
     flusso_out = {v: gp.quicksum(x[a] for a in grafo.delta_out[v]) for v in nodi}
 
@@ -306,19 +237,16 @@ def costruisci_modello(
 
     # --- obiettivo ----------------------------------------------------
     if consenti_rifiuti:
-        # Senza penalizzazione dei rifiuti l'ottimo e' la soluzione vuota.
-        # Gurobi non protesta se manca l'obiettivo: assume "minimize 0" e
-        # restituisce OPTIMAL con valore 0. Il flag serve esattamente a
-        # impedire che quel risultato passi per buono.
+        # senza un obiettivo che penalizzi i rifiuti Gurobi minimizzerebbe 0 e darebbe
+        # come ottimo la soluzione vuota: il flag impedisce di risolvere il modello così
         m._richiede_obiettivo = True
         m._obiettivo = None
         m._coefficienti = None
     else:
         m.setObjective(gp.quicksum(costo[a] * x[a] for a in archi), GRB.MINIMIZE)
         m._richiede_obiettivo = False
-        # Stesso formato di objectives.imposta_somma_pesata: tutti e quattro i
-        # criteri, quelli assenti con peso zero. Cosi' results.py tratta allo
-        # stesso modo un modello di default e uno passato da objectives.py.
+        # stesso formato di objectives.imposta_somma_pesata, così results.py tratta
+        # allo stesso modo questo modello e quelli con obiettivo impostato
         m._obiettivo = "fc"
         m._coefficienti = {"costo": 1.0, "regret": 0.0,
                            "regret_max": 0.0, "rifiuti": 0.0}
@@ -358,9 +286,8 @@ def _vincoli_comuni(m, grafo, x, B, p, nodi, archi, deposito,
     for v in nodi:
         m.addConstr(flusso_in[v] - flusso_out[v] == 0, name=f"flusso[{etichetta(v)}]")
 
-    # (1c) / (3) copertura delle richieste: esattamente un nodo di pickup di i
-    # e' raggiunto, e lo e' una volta sola. La somma e' doppia: su tutti i nodi
-    # di pickup di i, e per ciascuno su tutti i suoi archi entranti.
+    # (1c) / (3) copertura: per ogni utente, esattamente uno dei suoi nodi di pickup
+    # riceve un arco (nessuno, se p_i = 0)
     for i in istanza.utenti():
         servita = gp.quicksum(flusso_in[v] for v in grafo.nodi_pickup(i))
         if p is None:
@@ -389,14 +316,9 @@ def _vincoli_comuni(m, grafo, x, B, p, nodi, archi, deposito,
 
 def _vincoli_tempo_modello_I(m, grafo, B, flusso_in, M_ride) -> None:
     """
-    (2e) ride time linearizzato con big-M.
-
-        B_w - B_v - s_i+ <= L_i + M_i (2 - somma_in(v) - somma_in(w))
-
-    La parentesi vale 0 se entrambi i nodi sono attivi (vincolo vero), 1 se lo e'
-    uno solo, 2 se nessuno: in quei casi il big-M lo disattiva. Una riga per ogni
-    coppia (nodo di pickup, nodo di drop-off) dello stesso utente, cioe'
-    O(n^(2Q-1)) righe, ciascuna con due somme di archi dentro.
+    (2e) ride time con big-M:  B_w - B_v - s_i+ <= L_i + M_i (2 - somma_in(v) - somma_in(w)).
+    La parentesi vale 0 solo se entrambi i nodi sono usati; altrimenti il big-M
+    disattiva il vincolo. Una riga per ogni coppia (pickup, drop-off) dello stesso utente.
     """
     istanza = grafo.istanza
     for i in istanza.utenti():
@@ -413,27 +335,22 @@ def _vincoli_tempo_modello_I(m, grafo, B, flusso_in, M_ride) -> None:
 
 def _vincoli_tempo_modello_II(m, grafo, B, flusso_in, M_ride) -> None:
     """
-    (9e), (9f), (9g): ride time senza meccanismo di attivazione.
+    (9e), (9f), (9g): ride time senza big-M.
 
-        (9g)  B_w - B_v - s_i+ <= L_i              su TUTTE le coppie
-        (9e)  B_v >= e_i+ + M_i (1 - somma_in(v))  sui nodi di pickup
-        (9f)  B_v <= e_i+ + L_i + s_i+ + M_i somma_in(v)   sui nodi di drop-off
+        (9g)  B_w - B_v - s_i+ <= L_i                       per ogni coppia (v, w)
+        (9e)  B_v >= e_i+ + M_i (1 - somma_in(v))           nodi di pickup
+        (9f)  B_w <= e_i+ + L_i + s_i+ + M_i somma_in(w)    nodi di drop-off
 
-    (9g) e' imposta anche sui "nodi fantasma", quelli che nessuna rotta usa.
-    Sono le (9e)/(9f) a renderla innocua: spingono i pickup inattivi in alto e i
-    drop-off inattivi in basso, quel tanto che basta perche' (9g) risulti
-    automaticamente soddisfatta. I quattro casi:
+    (9g) vale anche sui nodi fantasma, quelli che nessuna rotta usa: (9e)/(9f) spingono
+    i pickup fantasma in alto e i drop-off fantasma in basso, così (9g) è sempre
+    soddisfatta:
 
-        v attivo,   w attivo   -> vincolo vero, e' quello che vogliamo
-        v attivo,   w inattivo -> B_w <= e_i+ + L_i + s_i+  => margine esatto L_i
-        v inattivo, w attivo   -> B_v >= l_i- - L_i - s_i+  => margine esatto L_i
-        v inattivo, w inattivo -> vale sse l_i- >= e_i+ + s_i+ + L_i, cioe' M_i >= 0
+        v usato,     w usato      -> è il vincolo di ride time vero
+        v usato,     w fantasma   -> B_w <= e_i+ + L_i + s_i+, margine L_i
+        v fantasma,  w usato      -> B_v >= l_i- - L_i - s_i+, margine L_i
+        v fantasma,  w fantasma   -> vale se M_i >= 0 (garantito da calcola_M_ride)
 
-    Tutta la correttezza poggia su M_i >= 0, garantito da calcola_M_ride.
-
-    Nota sui coefficienti: quando il nodo di drop-off e' attivo, (9f) da'
-    e_i+ + L_i + s_i+ + M_i = l_i-, esattamente il bound naturale. Le righe
-    (9e)/(9f) non stringono mai un nodo attivo: agiscono solo sui fantasmi.
+    Su un nodo usato (9e)/(9f) danno i bound naturali e_i+ e l_i-, quindi non lo stringono.
     """
     istanza = grafo.istanza
     for i in istanza.utenti():
@@ -467,7 +384,7 @@ def _vincoli_tempo_modello_II(m, grafo, B, flusso_in, M_ride) -> None:
 # ----------------------------------------------------------------------
 
 def dimensioni(m: gp.Model) -> dict[str, int]:
-    """Dimensioni della matrice, per le tabelle di confronto della relazione."""
+    """Dimensioni del modello: variabili, binarie, vincoli, nonzeri."""
     m.update()
     return {
         "variabili": m.NumVars,
@@ -518,9 +435,7 @@ if __name__ == "__main__":
         scarto = abs(risultati["I"] - risultati["II"])
         print(f"\nScarto |Model I - Model II| = {scarto:.6f}")
         assert scarto < 1e-4, (
-            "I due modelli danno ottimi diversi: sono equivalenti per "
-            "costruzione, quindi c'e' un errore. Sospetti nell'ordine: "
-            "M_tilde troppo piccolo, M_i troppo piccolo, finestre dei nodi "
-            "fantasma nel Model II, is_partenza invertito nei precalcoli."
+            "Model I e Model II danno ottimi diversi, ma sono equivalenti: "
+            "c'è un errore nei vincoli."
         )
         print("OK: Model I e Model II concordano.")

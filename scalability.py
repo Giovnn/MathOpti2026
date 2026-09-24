@@ -1,23 +1,19 @@
 """
-scalability.py - Analisi di scalabilita' di Model I e Model II.
+Analisi di scalabilità di Model I e Model II: risolve con entrambi i modelli
+(costo di routing f_c) istanze Cordeau via via più grandi e confronta costi e
+tempi con le Tabelle 5 e 6 di Gaul, Klamroth & Stiglmayr (2022).
 
-Risolve con entrambi i modelli (obiettivo del paper: costo di routing f_c) istanze
-Cordeau via via piu' grandi e confronta costi e tempi con le Tabelle 5 e 6 di Gaul,
-Klamroth & Stiglmayr (2022).
+Scala di istanze, tutte con T = 720 minuti, +12 utenti e +1 veicolo a ogni gradino:
+    serie a: capacità 3, un posto per utente
+    serie b: capacità 6, da 1 a 6 posti per utente
 
-La scala di istanze: tutte con lo stesso orizzonte di servizio (T = 720 minuti); a ogni
-gradino 12 utenti e un veicolo in piu'.
-    serie a: capacita' 3, un posto per utente
-    serie b: capacita' 6, da 1 a 6 posti per utente
+Due modalità:
+    così com'è                    fino a 84 utenti, pochi minuti
+    togliendo il '#' davanti a    fino a 96 utenti, circa 40 minuti
+    a8-96 e b8-96 in ISTANZE      (nel paper: un'ora su a8-96, otto minuti su b8-96)
 
-Due modalita':
-    cosi' com'e'                              fino a 84 utenti, pochi minuti
-    togliendo il '#' davanti alle righe       fino a 96 utenti, circa 40 minuti
-    di a8-96 e b8-96 in ISTANZE               (nel paper Model I impiega un'ora su a8-96,
-                                               Model II otto minuti)
-
-I tempi non sono confrontabili in assoluto con quelli del paper (CPLEX 12.10 su un altro
-computer): si confrontano l'andamento al crescere delle istanze e quale modello e' piu'
+I tempi non sono confrontabili in assoluto con il paper (CPLEX 12.10 su un altro
+computer): contano l'andamento al crescere delle istanze e quale modello è più
 veloce. Sotto il secondo le differenze fra i due modelli sono rumore.
 
 Esecuzione:  python scalability.py
@@ -110,7 +106,7 @@ def testo(valore, formato: str) -> str:
 
 
 def al_limite(riga: dict) -> bool:
-    """Il modello si e' fermato per il limite di tempo (con o senza soluzione)."""
+    """Il modello si è fermato per il limite di tempo (con o senza soluzione)."""
     return riga["esito"] in ("tempo scaduto", "N/A")
 
 
@@ -134,7 +130,7 @@ def crea_csv() -> None:
 
 
 def aggiungi_al_csv(riga: dict) -> None:
-    """Una riga alla volta: se il run si interrompe, le righe gia' scritte restano."""
+    """Una riga alla volta: se il run si interrompe, le righe già scritte restano."""
     with open(FILE_CSV, "a", newline="", encoding="utf-8") as f:
         csv.DictWriter(f, fieldnames=COLONNE).writerow(riga)
 
@@ -172,7 +168,7 @@ def esegui(righe: list[dict]) -> None:
 # ----------------------------------------------------------------------
 
 def chi_vince(t_I: float | None, t_II: float | None) -> str:
-    """Il modello piu' veloce e di quante volte (tempi minimi a 0.01 s)."""
+    """Il modello più veloce e di quante volte (tempi minimi a 0.01 s)."""
     if t_I is None or t_II is None:
         return "-"
     t_I, t_II = max(t_I, 0.01), max(t_II, 0.01)
