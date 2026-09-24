@@ -91,14 +91,13 @@ def schedule_minimo(sequenza_id: list[int],
     vincoli_ride: coppie (posizione del pickup, posizione della delivery)
         nella sequenza, una per ogni utente il cui ride time va limitato.
     tempi: tempi di percorrenza fra posizioni consecutive (lunghezza n-1).
-        None -> si usano le distanze dell'istanza (costo == tempo, benchmark
-        Cordeau). Per le rotte estratte dal modello passare i tempi degli
-        archi (m._tempo): restano corretti anche quando costo e tempo
-        differiscono (istanze OSM).
+        None -> si usano i tempi dell'istanza (istanza.tempo), corretti per
+        entrambi i formati. Per le rotte estratte dal modello si possono
+        passare i tempi degli archi (m._tempo).
     """
     n = len(sequenza_id)
     if tempi is None:
-        tempi = [istanza.distanza(sequenza_id[k], sequenza_id[k + 1])
+        tempi = [istanza.tempo(sequenza_id[k], sequenza_id[k + 1])
                  for k in range(n - 1)]
     elif len(tempi) != n - 1:
         raise ValueError(f"servono {n - 1} tempi di percorrenza, ricevuti {len(tempi)}")
@@ -117,7 +116,8 @@ def schedule_minimo(sequenza_id: list[int],
 
     for pos_p, pos_d in vincoli_ride:
         s_p = istanza.nodo(sequenza_id[pos_p]).servizio
-        archi.append((pos_d, pos_p, istanza.L + s_p))
+        L_i = istanza.ride_max(istanza.utente(sequenza_id[pos_p]))
+        archi.append((pos_d, pos_p, L_i + s_p))
 
     dist = [0.0] * (n + 1)
     for _ in range(n + 1):
@@ -172,7 +172,7 @@ def _orari_fattibili(sequenza_id: list[int], istanza: Istanza) -> list[float] | 
         else:
             id_prec = sequenza_id[idx - 1]
             nodo_prec = istanza.nodo(id_prec)
-            arrivo = B[idx - 1] + nodo_prec.servizio + istanza.distanza(id_prec, id_nodo)
+            arrivo = B[idx - 1] + nodo_prec.servizio + istanza.tempo(id_prec, id_nodo)
         inizio = max(arrivo, nodo.e)
         if inizio > nodo.l + EPS:
             return None
@@ -187,7 +187,8 @@ def _f_forward(sequenza: list[int], vincoli_ride: list[tuple[int, int]],
         return False
     for pos_p, pos_d in vincoli_ride:
         s_p = istanza.nodo(sequenza[pos_p]).servizio
-        if B[pos_d] - (B[pos_p] + s_p) > istanza.L + EPS:
+        L_i = istanza.ride_max(istanza.utente(sequenza[pos_p]))
+        if B[pos_d] - (B[pos_p] + s_p) > L_i + EPS:
             return False
     return True
 
@@ -407,16 +408,21 @@ def localita_id(nodo: Nodo, istanza: Istanza, *, is_partenza: bool) -> int:
     return istanza.pickup(utente).id if nodo[0] > 0 else istanza.delivery(utente).id
 
 
-def costo_arco(arco: Arco, istanza: Istanza) -> float:
-    """ca: costo di routing dell'arco = distanza tra le due localita' fisiche."""
+def _localita_arco(arco: Arco, istanza: Istanza) -> tuple[int, int]:
+    """Id delle due localita' fisiche collegate dall'arco (partenza, arrivo)."""
     v, w = arco
-    id_v = localita_id(v, istanza, is_partenza=True)
-    id_w = localita_id(w, istanza, is_partenza=False)
-    return istanza.distanza(id_v, id_w)
+    return (localita_id(v, istanza, is_partenza=True),
+            localita_id(w, istanza, is_partenza=False))
 
 
-# Nei benchmark Cordeau (e nel paper) costo = tempo = distanza euclidea.
-tempo_arco = costo_arco
+def costo_arco(arco: Arco, istanza: Istanza) -> float:
+    """c_a: costo di routing dell'arco (Cordeau: distanza euclidea; OSM: km su strada)."""
+    return istanza.costo(*_localita_arco(arco, istanza))
+
+
+def tempo_arco(arco: Arco, istanza: Istanza) -> float:
+    """t_a: tempo di viaggio dell'arco in minuti (Cordeau: = costo; OSM: 4 * costo a 15 km/h)."""
+    return istanza.tempo(*_localita_arco(arco, istanza))
 
 
 # ----------------------------------------------------------------------
