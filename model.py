@@ -103,7 +103,7 @@ def calcola_M_ride(istanza: Istanza) -> dict[int, float]:
     M: dict[int, float] = {}
     for i in istanza.utenti():
         p, d = istanza.pickup(i), istanza.delivery(i)
-        grezzo = d.l - p.e - p.servizio - istanza.L
+        grezzo = d.l - p.e - p.servizio - istanza.ride_max(i)
         if grezzo < -EPS:
             raise ValueError(
                 f"{istanza.nome}: richiesta {i} infeasible: "
@@ -399,14 +399,14 @@ def _vincoli_tempo_modello_I(m, grafo, B, flusso_in, M_ride) -> None:
     O(n^(2Q-1)) righe, ciascuna con due somme di archi dentro.
     """
     istanza = grafo.istanza
-    L = istanza.L
     for i in istanza.utenti():
         s_i = istanza.pickup(i).servizio
+        L_i = istanza.ride_max(i)
         M_i = M_ride[i]
         for v in grafo.nodi_pickup(i):
             for w in grafo.nodi_delivery(i):
                 m.addConstr(
-                    B[w] - B[v] - s_i <= L + M_i * (2 - flusso_in[v] - flusso_in[w]),
+                    B[w] - B[v] - s_i <= L_i + M_i * (2 - flusso_in[v] - flusso_in[w]),
                     name=f"ride[{i},{etichetta(v)},{etichetta(w)}]",
                 )
 
@@ -436,10 +436,10 @@ def _vincoli_tempo_modello_II(m, grafo, B, flusso_in, M_ride) -> None:
     (9e)/(9f) non stringono mai un nodo attivo: agiscono solo sui fantasmi.
     """
     istanza = grafo.istanza
-    L = istanza.L
     for i in istanza.utenti():
         pick = istanza.pickup(i)
         s_i, e_i_piu = pick.servizio, pick.e
+        L_i = istanza.ride_max(i)
         M_i = M_ride[i]
 
         for v in grafo.nodi_pickup(i):
@@ -450,14 +450,14 @@ def _vincoli_tempo_modello_II(m, grafo, B, flusso_in, M_ride) -> None:
 
         for w in grafo.nodi_delivery(i):
             m.addConstr(
-                B[w] <= e_i_piu + L + s_i + M_i * flusso_in[w],
+                B[w] <= e_i_piu + L_i + s_i + M_i * flusso_in[w],
                 name=f"tw_delivery[{i},{etichetta(w)}]",
             )
 
         for v in grafo.nodi_pickup(i):
             for w in grafo.nodi_delivery(i):
                 m.addConstr(
-                    B[w] - B[v] - s_i <= L,
+                    B[w] - B[v] - s_i <= L_i,
                     name=f"ride[{i},{etichetta(v)},{etichetta(w)}]",
                 )
 
