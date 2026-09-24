@@ -1,26 +1,23 @@
 """
-graph.py — Costruzione del grafo event-based G = (V, A) per il DARP.
+Costruzione del grafo event-based G = (V, A) per il DARP
+(Gaul, Klamroth & Stiglmayr 2022, Sez. 3.1).
 
-Riferimento: Gaul, Klamroth & Stiglmayr (2022), EJOR 301(3), Sez. 3.1.
+Invece di un grafo geografico, ogni nodo qui è uno stato di occupazione del
+veicolo (una Q-tupla), con la prima componente che indica l'evento più recente.
 
-Idea chiave del paper: invece di un grafo geografico (nodi = luoghi fisici),
-ogni nodo qui rappresenta uno STATO DI OCCUPAZIONE del veicolo (una "Q-tupla"),
-con la prima componente che indica l'evento piu' recente (pickup o delivery).
-
-Convenzione di codifica di un nodo (v1, v2, ..., vQ):
-    v1 = +i   -> utente i appena caricato (evento pickup, "i+")
-    v1 = -i   -> utente i appena scaricato (evento delivery, "i-")
-    vj = 0    -> posto libero (per j >= 2, zero-padding in coda)
-    vj = k>0  -> utente k seduto a bordo (per j >= 2)
+Codifica di un nodo (v1, v2, ..., vQ):
+    v1 = +i   -> utente i appena caricato (pickup, "i+")
+    v1 = -i   -> utente i appena scaricato (delivery, "i-")
+    vj = 0    -> posto libero (j >= 2, zero-padding in coda)
+    vj = k>0  -> utente k seduto a bordo (j >= 2)
     (0,0,...,0) -> deposito
 
-Ordinamento canonico (par. 2.2 del paper), per evitare che permutazioni della
-stessa allocazione generino nodi duplicati:
-    - v1 = ultimo evento (con il segno)
-    - v2..vQ = compagni di viaggio, ordine DECRESCENTE, zeri in coda
+Forma canonica (par. 2.2), per evitare che permutazioni della stessa
+allocazione diano nodi duplicati: v1 è l'ultimo evento (con segno), v2..vQ
+sono i compagni di viaggio in ordine decrescente, zeri in coda.
 
-Questo modulo dipende SOLO dall'interfaccia pubblica di Istanza (instances.py):
-non conosce il formato Cordeau, non legge file. Riceve un'Istanza gia' pronta.
+Il modulo dipende solo dall'interfaccia pubblica di Istanza: non conosce il
+formato dei file, riceve un'Istanza già pronta.
 """
 
 from dataclasses import dataclass, field
@@ -34,14 +31,14 @@ Arco = tuple[Nodo, Nodo]
 
 
 # ----------------------------------------------------------------------
-# FASE 3.2 — Indicatori di fattibilita' f1, f2
+# Indicatori di fattibilita' f1, f2 (Sez. 3.2)
 # ----------------------------------------------------------------------
 #
-# f1(i,j): fattibile visitare j+ -> i+ -> j- -> i-   (il giro di i "annidato" in quello di j)
-# f2(i,j): fattibile visitare j+ -> i+ -> i- -> j-   (i sale e scende, tutto dentro il giro di j)
+# f1(i,j): fattibile visitare j+ -> i+ -> j- -> i- (il giro di i dentro quello di j)
+# f2(i,j): fattibile visitare j+ -> i+ -> i- -> j- (i sale e scende dentro il giro di j)
 #
-# Convenzione del paper: f1(i,0) = f1(0,i) = f2(i,0) = f2(0,i) = 1 (il "deposito"
-# come utente fittizio non impone mai vincoli).
+# Convenzione del paper: f1(i,0) = f1(0,i) = f2(i,0) = f2(0,i) = 1, il deposito
+# come utente fittizio non impone mai vincoli.
 
 EPS = 1e-9  # tolleranza sui confronti float (i ride time cadono spesso esattamente su L)
 
@@ -50,11 +47,11 @@ _metodo_fattibilita = "esatto"
 
 
 def imposta_metodo_fattibilita(metodo: str) -> None:
-    """Sceglie l'implementazione di f1/f2 usata dal resto del modulo.
-
-    "esatto"  -> esiste uno schedule ammissibile? (definizione del paper)
-    "forward" -> lo schedule "tutto il prima possibile" e' ammissibile?
-                 Condizione piu' stretta: conservata solo per confronto.
+    """
+    Sceglie l'implementazione di f1/f2 usata dal resto del modulo.
+    "esatto": esiste uno schedule ammissibile (definizione del paper).
+    "forward": è ammissibile lo schedule "tutto il prima possibile", condizione
+    più stretta, tenuta solo per confronto.
     """
     global _metodo_fattibilita
     if metodo not in METODI_FATTIBILITA:
@@ -74,26 +71,23 @@ def schedule_minimo(sequenza_id: list[int],
                     istanza: Istanza,
                     tempi: list[float] | None = None) -> list[float] | None:
     """
-    Schedule minimo lungo la sequenza di localita' data: per ogni posizione k
-    il piu' piccolo istante di inizio servizio B_k compatibile con finestre,
-    tempi di viaggio e ride time. None se nessuno schedule e' ammissibile.
+    Schedule minimo lungo la sequenza di località data: per ogni posizione k il più
+    piccolo istante di inizio servizio B_k compatibile con finestre, tempi di viaggio
+    e ride time. None se nessuno schedule è ammissibile.
 
-    Tutti i vincoli in gioco hanno la forma B_u - B_v <= c:
+    Tutti i vincoli hanno la forma B_u - B_v <= c:
         B_k >= e_k                      ->  B_rif - B_k <= -e_k
         B_k <= l_k                      ->  B_k - B_rif <=  l_k
         B_{k+1} >= B_k + s_k + t_k      ->  B_k - B_{k+1} <= -(s_k + t_k)
-        B_d - B_p <= L + s_p            ->  gia' in forma
-    Un sistema di vincoli di differenza e' ammissibile se e solo se il suo
-    grafo dei vincoli non contiene cicli negativi (Bellman-Ford). Al punto
-    fisso, B = -dist e' una soluzione, ed e' la piu' piccola: partendo da
-    dist = 0, ogni distanza viene abbassata solo quanto strettamente serve.
+        B_d - B_p <= L + s_p            ->  vincolo di ride time
+    Un sistema di vincoli di differenza è ammissibile se e solo se il suo grafo dei
+    vincoli non ha cicli negativi (Bellman-Ford). Al punto fisso, B = -dist è la
+    soluzione più piccola: partendo da dist = 0, ogni distanza scende solo quanto serve.
 
-    vincoli_ride: coppie (posizione del pickup, posizione della delivery)
-        nella sequenza, una per ogni utente il cui ride time va limitato.
-    tempi: tempi di percorrenza fra posizioni consecutive (lunghezza n-1).
-        None -> si usano i tempi dell'istanza (istanza.tempo), corretti per
-        entrambi i formati. Per le rotte estratte dal modello si possono
-        passare i tempi degli archi (m._tempo).
+    vincoli_ride: coppie (posizione del pickup, posizione della delivery) nella
+    sequenza, una per ogni utente il cui ride time va limitato.
+    tempi: tempi di percorrenza fra posizioni consecutive (lunghezza n-1). None usa
+    istanza.tempo; per le rotte estratte dal modello si passano i tempi degli archi.
     """
     n = len(sequenza_id)
     if tempi is None:
@@ -135,7 +129,7 @@ def schedule_minimo(sequenza_id: list[int],
 def _esiste_schedule(sequenza_id: list[int],
                      vincoli_ride: list[tuple[int, int]],
                      istanza: Istanza) -> bool:
-    """Esiste uno schedule ammissibile? E' la domanda che il paper pone con f1/f2."""
+    """Esiste uno schedule ammissibile? È la domanda che f1/f2 pongono."""
     return schedule_minimo(sequenza_id, vincoli_ride, istanza) is not None
 
 
@@ -155,14 +149,12 @@ def _f2_esatto(i: int, j: int, istanza: Istanza) -> bool:
 
 def _orari_fattibili(sequenza_id: list[int], istanza: Istanza) -> list[float] | None:
     """
-    Simula in avanti i tempi di inizio servizio B lungo una sequenza fissa di
-    localita' (dati i loro id in Istanza). Ritorna la lista dei B se la
-    sequenza rispetta tutte le finestre temporali, altrimenti None.
+    Simula in avanti i tempi di inizio servizio lungo una sequenza fissa di località,
+    scegliendo sempre l'orario più presto possibile. Ritorna None se una finestra
+    temporale viene violata.
 
-    ATTENZIONE: costruisce UN solo schedule, quello "tutto il prima possibile".
-    E' dominante per le finestre temporali ma non per i ride time: ogni attesa
-    a bordo gonfia il ride time dei passeggeri gia' caricati. Usata solo dalla
-    variante "forward" di f1/f2.
+    Questo schedule rispetta le finestre ma non è detto che minimizzi i ride time: ogni
+    attesa a bordo li allunga. Usato solo dalla variante "forward" di f1/f2.
     """
     B: list[float] = []
     for idx, id_nodo in enumerate(sequenza_id):
@@ -226,22 +218,19 @@ def f2(i: int, j: int, istanza: Istanza) -> bool:
 
 
 # ----------------------------------------------------------------------
-# FASE 3.1 — Generazione dei nodi V (ora con filtro f1/f2 oltre alla capacita')
+# Generazione dei nodi (Sez. 3.1)
 # ----------------------------------------------------------------------
 
 def genera_companion_validi(utente: int, tipo: str, istanza: Istanza) -> list[tuple[int, ...]]:
     """
-    Tutti i sottoinsiemi di "compagni di viaggio" ammissibili per un evento
-    (pickup o delivery) dell'utente `utente`, rispettando:
-      1) il vincolo di capacita' (Sigma q <= Q);
-      2) la compatibilita' individuale f1/f2 di ciascun compagno con `utente`
-         (Fase 3.2). Nota: il paper NON richiede compatibilita' a coppie tra i
-         compagni stessi, solo con l'utente "focale" dell'evento.
+    Sottoinsiemi di compagni di viaggio ammissibili per un evento (pickup o delivery)
+    dell'utente `utente`: rispettano la capacità (somma q <= Q) e la compatibilità
+    individuale f1/f2 di ciascun compagno con `utente`. Il paper non richiede
+    compatibilità a coppie fra i compagni stessi, solo con l'utente dell'evento.
 
-    La condizione di ammissibilita' individuale e' asimmetrica tra pickup e
-    delivery (vedi definizioni Vi+/Vi- del paper, pag. 4):
-      - pickup:   f1(utente, compagno) OR f2(utente, compagno)
-      - delivery: f1(compagno, utente) OR f2(utente, compagno)
+    La condizione è asimmetrica fra pickup e delivery (definizioni Vi+/Vi-, pag. 4):
+        pickup:   f1(utente, compagno) OR f2(utente, compagno)
+        delivery: f1(compagno, utente) OR f2(utente, compagno)
     """
     if tipo not in ("pickup", "delivery"):
         raise ValueError(f"tipo non valido: {tipo!r} (atteso 'pickup' o 'delivery')")
@@ -271,10 +260,9 @@ def genera_companion_validi(utente: int, tipo: str, istanza: Istanza) -> list[tu
 
 def crea_nodo(utente: int, tipo: str, compagni: tuple[int, ...], Q: int) -> Nodo:
     """
-    Costruisce la rappresentazione canonica (Q-tupla) di un evento.
-
-    tipo: "pickup" o "delivery" -> determina il segno di v1.
-    compagni: utenti aggiuntivi a bordo (senza `utente`), gia' un insieme valido.
+    Rappresentazione canonica (Q-tupla) di un evento.
+    tipo determina il segno di v1; compagni sono gli utenti a bordo oltre a `utente`,
+    già un insieme valido.
     """
     if tipo not in ("pickup", "delivery"):
         raise ValueError(f"tipo non valido: {tipo!r} (atteso 'pickup' o 'delivery')")
@@ -299,14 +287,12 @@ def genera_nodi(istanza: Istanza) -> set[Nodo]:
 
 
 # ----------------------------------------------------------------------
-# FASE 3.3 — Generazione degli archi A = A1 U ... U A6
+# Generazione degli archi A = A1 U ... U A6 (Sez. 3.3)
 # ----------------------------------------------------------------------
 #
-# Ogni Ak e' definito (pag. 4-5 del paper) come uguaglianza tra insiemi di
-# occupanti prima/dopo la transizione. Qui sfruttiamo il fatto che i nodi
-# sono gia' in forma canonica: confrontare insiemi di interi e' sufficiente,
-# non serve un ordinamento esplicito (tranne in A3, dove il paper stesso usa
-# le stesse variabili v2..vQ su entrambi i lati => confronto diretto di tupla).
+# Ogni Ak è definito (pag. 4-5) come uguaglianza fra insiemi di occupanti
+# prima/dopo la transizione. I nodi sono già in forma canonica, quindi confrontare
+# insiemi di interi basta, tranne in A3 dove il paper confronta le tuple v2..vQ direttamente.
 
 def _pickup_index(grafo: "Grafo") -> dict[int, list[Nodo]]:
     return {i: grafo.nodi_pickup(i) for i in grafo.istanza.utenti()}
@@ -389,18 +375,15 @@ def genera_archi(grafo: "Grafo") -> set[Arco]:
 
 
 # ----------------------------------------------------------------------
-# FASE 3.4 — Costi e tempi degli archi
+# Costi e tempi degli archi (Sez. 3.4)
 # ----------------------------------------------------------------------
 
 def localita_id(nodo: Nodo, istanza: Istanza, *, is_partenza: bool) -> int:
     """
-    Id della localita' fisica (in Istanza) associata a un nodo evento.
-
-    Il deposito e' un caso speciale: nel formato Cordeau esistono DUE id fisici
-    per il deposito (0 = iniziale, 2n+1 = finale), ma nel grafo event-based e'
-    rappresentato da un UNICO nodo (0,...,0). `is_partenza` disambigua quale
-    dei due usare quando il nodo deposito e' l'origine o la destinazione
-    dell'arco che si sta valutando.
+    Id della località fisica (in Istanza) di un nodo evento.
+    Il deposito è un caso speciale: ha due id fisici nel file (0 iniziale, 2n+1
+    finale) ma un solo nodo nel grafo event-based. `is_partenza` sceglie quale dei
+    due usare, a seconda che il nodo sia origine o destinazione dell'arco.
     """
     if all(v == 0 for v in nodo):
         return istanza.deposito_iniziale().id if is_partenza else istanza.deposito_finale().id
@@ -473,8 +456,8 @@ class Grafo:
 
 
 if __name__ == "__main__":
-    # --- Sanity check sull'Esempio 1 del paper (Sez. 3.1, pag. 5) ---
-    # 3 utenti, Q=3, q1=q2=1, q3=3. Niente finestre temporali in questo esempio.
+    # verifica sull'Esempio 1 del paper (Sez. 3.1, pag. 5): 3 utenti, Q=3,
+    # q1=q2=1, q3=3, nessuna finestra temporale
     from instances import Nodo as NodoIstanza
 
     istanza_esempio = Istanza(
@@ -504,7 +487,7 @@ if __name__ == "__main__":
     print("OK: nessun nodo contiene utenti 1 e 3 insieme.")
 
     # Controllo 2: i due dicycle d'esempio del paper (C1, C2) devono essere
-    # percorribili, cioe' ogni arco che li compone deve esistere in g.archi.
+    # percorribili: ogni arco che li compone deve esistere in g.archi.
     C1 = [(0, 0, 0), (1, 0, 0), (2, 1, 0), (-2, 1, 0), (-1, 0, 0), (0, 0, 0)]
     C2 = [(0, 0, 0), (3, 0, 0), (-3, 0, 0), (0, 0, 0)]
 
