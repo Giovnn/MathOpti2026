@@ -1,5 +1,5 @@
 """
-test.py - Esecuzione dei modelli su istanze piccole.
+Esecuzione dei modelli su istanze piccole.
 
 Linee guida d'esame: "un file test.py in cui tutti gli algoritmi proposti vengono
 eseguiti su istanze di piccole dimensioni".
