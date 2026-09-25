@@ -86,9 +86,8 @@ def riepilogo(fase: str, G: nx.MultiDiGraph) -> None:
     print(f"{fase:<28} nodi = {G.number_of_nodes():>6}   archi = {G.number_of_edges():>6}"
           f"   km di archi = {km:6.1f}")
 
-
-def costruisci_rete_da_xml(percorso: Path) -> tuple[nx.MultiDiGraph, nx.MultiDiGraph]:
-    """Restituisce (grafo finale, grafo filtrato prima della componente forte)."""
+def costruisci_rete_da_xml(percorso: Path) -> tuple[nx.MultiDiGraph, nx.MultiDiGraph, nx.MultiDiGraph]:
+    """Restituisce (grafo finale, grafo filtrato, componente forte prima della semplificazione)."""
     G = carica_da_xml(percorso)
     riepilogo("1. caricato (tutto)", G)
 
@@ -108,7 +107,7 @@ def costruisci_rete_da_xml(percorso: Path) -> tuple[nx.MultiDiGraph, nx.MultiDiG
     senso_unico = sum(1 for _u, _v, d in G_forte.edges(data=True) if d.get("oneway") is True)
     print(f"\nArchi a senso unico (prima della semplificazione): "
           f"{senso_unico} su {G_forte.number_of_edges()}")
-    return G_finale, G_filtrato
+    return G_finale, G_filtrato, G_forte
 
 
 def disegna_scartati(G_filtrato: nx.MultiDiGraph, G_forte_nodi: set, filepath: Path) -> None:
@@ -126,7 +125,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     percorso = Path(sys.argv[1])
-    G, G_filtrato = costruisci_rete_da_xml(percorso)
+    G, G_filtrato, G_forte = costruisci_rete_da_xml(percorso)
 
     file_graphml = percorso.with_name(percorso.stem + "_drive.graphml")
     file_rete = percorso.with_name(percorso.stem + "_drive.png")
@@ -136,5 +135,5 @@ if __name__ == "__main__":
     ox.plot.plot_graph(G, node_size=0, edge_color="black", edge_linewidth=0.8,
                        bgcolor="white", show=False, save=True, close=True, filepath=file_rete)
     # nodi carrabili scartati: quelli di G_filtrato fuori dalla componente forte
-    disegna_scartati(G_filtrato, set(componente_forte(G_filtrato).nodes), file_scartati)
+    disegna_scartati(G_filtrato, set(G_forte.nodes), file_scartati)
     print(f"\nSalvati: {file_graphml.name}, {file_rete.name}, {file_scartati.name}")
