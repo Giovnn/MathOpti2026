@@ -1,23 +1,27 @@
 """
-osm_city.py — Generatore di istanze DARP da una rete stradale OpenStreetMap,
-secondo la ricetta del caso Wuppertal (Sez. 4.2 del paper). Vale per qualunque
-citta': cambiano solo la rete (GraphML di rete_osm.py) e le coordinate del deposito.
+Generatore di istanze DARP da una rete stradale OpenStreetMap, secondo la ricetta
+del caso Wuppertal (Sez. 4.2 del paper). Vale per qualunque città: cambiano solo
+la rete (il GraphML prodotto da rete_osm.py) e le coordinate del deposito.
 
-Ogni istanza e' un file JSON con:
+Ogni istanza è un file JSON con:
   - i 2n+2 nodi nella convenzione Cordeau (0 deposito, 1..n pickup, n+1..2n delivery,
     2n+1 deposito finale), con finestre, servizio, domanda, L_i e tipo "inbound"
-  - la matrice dei costi c[a][b] in km fra i nodi (asimmetrica); il tempo e' c * 60/v
+  - la matrice dei costi c[a][b] in km fra i nodi (asimmetrica); il tempo è c * 60/v
 
-Scelte nostre, da dichiarare nella relazione:
-  - pickup/drop-off solo su strade con nome dei tipi in HIGHWAY_FERMATA
+Scelte nostre, non fissate dal paper:
+  - pickup e drop-off solo su strade con nome, dei tipi in HIGHWAY_FERMATA
   - pickup e drop-off distanti almeno DISTANZA_MIN_KM su strada
-  - richieste non servibili da sole (deposito -> pickup -> drop-off -> deposito)
+  - le richieste non servibili da sole (deposito -> pickup -> drop-off -> deposito)
     vengono ricampionate per intero; gli scarti sono salvati nel file
-  - K = n (flotta non vincolante): con richieste servibili da sole, f_c e' sempre feasible
+  - K = n provvisorio: il numero di veicoli definitivo lo scrive imposta_k.py,
+    dalla Tabella 7 del paper
 
-Uso da terminale:
-    python osm_city.py OpenMap\\trieste_osm_highway_drive.graphml dati_milp\\trieste prova
-    python osm_city.py OpenMap\\trieste_osm_highway_drive.graphml dati_milp\\trieste
+Uso:
+    python osm_city.py trieste_osm_highway_drive.graphml istanze_trieste prova
+    python osm_city.py trieste_osm_highway_drive.graphml istanze_trieste
+Con "prova" genera, stampa e salva una sola istanza (Q3, n = 20); senza, tutte le 60.
+Entrambi sovrascrivono i JSON della cartella con K = n: i seed sono fissi e le istanze
+escono identiche, ma poi va rilanciato imposta_k.py.
 """
 
 import json
@@ -56,7 +60,7 @@ TOLLERANZA = 1e-6
 
 
 # =============================================================================================
-# campionamento (stesse regole di analisi_campionamento.py)
+# campionamento
 # =============================================================================================
 def nomi_arco(dati: dict) -> list[str]:
     nome = dati.get("name")
@@ -82,6 +86,7 @@ def fermate_per_nome(G: nx.MultiDiGraph) -> dict[str, list[int]]:
 
 
 def campiona_nodo(rng: random.Random, fermate: dict[str, list[int]], nomi: list[str]) -> int:
+    """Fermata casuale: prima una strada a caso, poi un nodo a caso lungo quella strada."""
     nome = rng.choice(nomi)
     return rng.choice(fermate[nome])
 
@@ -141,7 +146,7 @@ def genera_richieste(rete: Rete, rng: random.Random, n: int, Q: int) -> tuple[li
         esito = esito_richiesta(e, q, rete.min_da_dep[p], km_pd * MINUTI_PER_KM,
                                 rete.min_verso_dep[d])
         if esito != "ok":
-            scarti[esito] += 1          # politica (a): si ricampiona l'intera richiesta
+            scarti[esito] += 1          # si ricampiona l'intera richiesta
             continue
         richieste.append(Richiesta(p, d, q, e))
     return richieste, scarti
@@ -198,7 +203,7 @@ def costruisci_istanza(nome: str, seed: str, Q: int, richieste: list[Richiesta],
 
 
 # =============================================================================================
-# verifica: fallisce rumorosamente se qualcosa non torna
+# verifica dell'istanza generata: ValueError al primo controllo che non torna
 # =============================================================================================
 def verifica(ist: dict) -> None:
     n, nome = ist["n"], ist["nome"]
@@ -230,6 +235,8 @@ def verifica(ist: dict) -> None:
             raise ValueError(f"{nome}: richiesta {i} non servibile da sola ({esito})")
 
 
+# =============================================================================================
+# generazione e salvataggio
 # =============================================================================================
 def genera(rete: Rete, Q: int, n: int, m: int) -> dict:
     seed = f"{CITTA}-Q{Q}-n{n}-m{m}"                 # seed leggibile e riproducibile
