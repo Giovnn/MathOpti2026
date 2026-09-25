@@ -91,6 +91,9 @@ def elabora(cartella: Path, csv_path: Path, obiettivi: tuple[str, ...], *,
 
     percorsi = [p for p in istanze_osm(cartella) if istanza_utilizzabile(p)]
     if solo:
+        mancanti = set(solo) - {p.stem for p in percorsi}
+        if mancanti:
+            raise SystemExit(f"istanze non trovate o non utilizzabili: {sorted(mancanti)}")
         percorsi = [p for p in percorsi if p.stem in solo]
     if not percorsi:
         raise SystemExit("nessuna istanza utilizzabile: lanciare prima imposta_k.py")
@@ -111,6 +114,10 @@ def elabora(cartella: Path, csv_path: Path, obiettivi: tuple[str, ...], *,
         inizio = time.perf_counter()
         riga = esegui_uno(grafo_corrente, obiettivo, time_limit=time_limit,
                           mip_gap=mip_gap, threads=threads)
+        if riga["stato"] == "interrotto":
+            # Ctrl+C durante la risoluzione: il run non va nel CSV, così al rilancio si rifà
+            print(f"\ninterrotto durante {istanza.nome} {obiettivo}: run non salvato")
+            return
         scrivi_riga(csv_path, riga)
 
         obj = riga.get("obj")
