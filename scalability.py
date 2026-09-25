@@ -7,10 +7,8 @@ Scala di istanze, tutte con T = 720 minuti, +12 utenti e +1 veicolo a ogni gradi
     serie a: capacità 3, un posto per utente
     serie b: capacità 6, da 1 a 6 posti per utente
 
-Due modalità:
-    così com'è                    fino a 84 utenti, pochi minuti
-    togliendo il '#' davanti a    fino a 96 utenti, circa 40 minuti
-    a8-96 e b8-96 in ISTANZE      (nel paper: un'ora su a8-96, otto minuti su b8-96)
+Le 14 istanze, da 24 a 96 utenti, richiedono sul nostro computer circa 5 minuti
+di solver in tutto (nel paper, su a8-96, Model I impiega un'ora e Model II otto minuti).
 
 I tempi non sono confrontabili in assoluto con il paper (CPLEX 12.10 su un altro
 computer): contano l'andamento al crescere delle istanze e quale modello è più
@@ -41,7 +39,7 @@ CARTELLA_RISULTATI = CARTELLA / "risultati"
 FILE_CSV = CARTELLA_RISULTATI / "scalability.csv"
 FILE_GRAFICO = CARTELLA_RISULTATI / "scalability.png"
 
-LIMITE_TEMPO = 7200   # secondi per esecuzione (30 minuti)
+LIMITE_TEMPO = 7200   # secondi per esecuzione (2 ore): solo una rete di sicurezza
 MIP_GAP = 1e-4        # tolleranza standard dei solver, la stessa di default di CPLEX
                       # (model.py, se non indicato, chiede l'ottimo esatto)
 
@@ -54,14 +52,14 @@ ISTANZE = {
     "a5-60": (808.4, 1.41, 1.03),
     "a6-72": (916.1, 17.88, 13.87),
     "a7-84": (1033.3, 35.70, 5.89),
-    "a8-96": (1229.7, 3593.0, 461.0),     # run completo: togliere il '#'
+    "a8-96": (1229.7, 3593.0, 461.0),
     "b2-24": (444.7, 0.06, 0.05),
     "b3-36": (603.8, 0.07, 0.09),
     "b4-48": (673.8, 1.14, 0.94),
     "b5-60": (902.0, 4.01, 0.92),
     "b6-72": (978.5, 3.48, 5.11),
     "b7-84": (1203.4, 2.93, 2.72),
-    "b8-96": (1185.6, 27.42, 24.26),      # run completo: togliere il '#'
+    "b8-96": (1185.6, 27.42, 24.26),
 }
 
 # Colonne della tabella, uguali a schermo e nel CSV.
