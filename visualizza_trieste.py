@@ -1,38 +1,35 @@
 """
-visualizza_trieste.py — Mappa interattiva delle istanze Trieste: rotte dei veicoli, pooling,
-pickup e dropoff, in un unico file HTML da aprire nel browser.
+Mappa interattiva delle istanze Trieste (rotte dei veicoli, pooling, pickup e
+drop-off) in un unico file HTML da aprire nel browser.
 
-Cosa fa, per ogni istanza JSON
-------------------------------
-1. Risolve Model II con l'obiettivo scelto (default f_c) e ricostruisce la rotta di ogni
-   veicolo SULLA STRADA: deposito -> fermate -> deposito. Ogni tratto fra due fermate
-   consecutive e' un arco del modello, cioe' il percorso piu' breve sulla rete. La somma
-   dei tratti deve dare il costo della rotta nel modello: lo script lo controlla.
-2. Per ogni tratto annota chi e' a bordo: sulla mappa lo spessore della linea cresce con i
-   passeggeri, e i tratti a veicolo vuoto sono grigi tratteggiati. Cosi' il pooling si vede.
-3. Per ogni richiesta calcola anche il percorso DIRETTO pickup -> dropoff (Dijkstra sulla
-   lunghezza, come osm_city.py) e controlla che coincida con costo_km[i][n+i] del JSON.
-   Sulla mappa i percorsi diretti si accendono con un interruttore.
-4. Scrive un solo file HTML con un menu per scegliere istanza e obiettivo.
-Senza Gurobi la mappa si fa lo stesso, ma solo con i percorsi diretti (niente rotte).
+Per ogni istanza:
+1. risolve Model II con gli obiettivi scelti (default f_c) e ricostruisce sulla rete
+   stradale la rotta di ogni veicolo, deposito -> fermate -> deposito. Ogni tratto fra
+   due fermate consecutive è un arco del modello, cioè il percorso più breve sulla
+   rete: la somma dei tratti deve dare il costo della rotta nel modello, e lo script
+   lo controlla;
+2. per ogni tratto annota chi è a bordo: lo spessore della linea cresce con i
+   passeggeri e i tratti a veicolo vuoto sono grigi tratteggiati;
+3. per ogni richiesta calcola il percorso diretto pickup -> drop-off, come in
+   osm_city.py, e controlla che coincida con costo_km[i][n+i] del JSON (sulla mappa
+   i percorsi diretti si accendono con un interruttore);
+4. scrive un solo file HTML, con un menu per scegliere istanza e obiettivo.
+Senza Gurobi la mappa si fa lo stesso, ma con i soli percorsi diretti.
 
-Regola dei colori
------------------
-Un gruppo di pooling e' un tratto della rotta di un veicolo fra due momenti in cui il
-veicolo e' vuoto. Esempio: la rotta  +16 +10 -16 +20 -20 -10  forma UN gruppo {16, 10, 20}:
-16 e 20 non sono mai a bordo insieme, ma sono entrambi a bordo con 10 (catena).
-Ogni gruppo ha un colore, e i tratti percorsi con quel gruppo a bordo hanno lo stesso colore.
-Le richieste rifiutate (solo con obiettivi che ammettono rifiuti) sono grigie.
+Colori: un gruppo di pooling è un tratto della rotta fra due momenti in cui il
+veicolo è vuoto. La rotta +16 +10 -16 +20 -20 -10 forma un solo gruppo {16, 10, 20}:
+16 e 20 non sono mai a bordo insieme, ma entrambi lo sono con 10. Ogni gruppo ha un
+colore, usato anche per i tratti percorsi con quel gruppo a bordo; le richieste
+rifiutate sono grigie.
 
-Uso (dalla cartella del progetto)
----------------------------------
-    python visualizza_trieste.py dati_milp\\trieste\\Trieste_Q3_20_*.json --rete OpenMap\\trieste_osm_highway_drive.graphml
+Uso (dalla cartella del progetto):
+    python visualizza_trieste.py istanze_trieste/Trieste_Q3.20.*.json --rete trieste_osm_highway_drive.graphml
     ... --obiettivi fc fr frcr     menu con tre obiettivi (default: solo fc)
     ... --senza-soluzione          niente Gurobi: solo percorsi diretti, un colore per richiesta
     ... --out mappa.html           nome del file prodotto (default: mappa_trieste.html)
-
 L'asterisco funziona anche dal terminale di Windows: i nomi li espande lo script.
-Il file HTML ha bisogno di internet solo per lo sfondo della mappa.
+Per aprire l'HTML serve internet: Leaflet, i font e lo sfondo della mappa vengono
+scaricati dal browser.
 """
 
 import argparse
@@ -71,14 +68,13 @@ PASSO_FRECCE_M = 700  # una freccia del verso di marcia ogni 700 metri di rotta
 
 
 # ----------------------------------------------------------------------
-# Blocco 1 — Rete stradale: percorsi e nomi delle vie
+# Rete stradale: percorsi e nomi delle vie
 # ----------------------------------------------------------------------
 
 def carica_rete(percorso: Path) -> nx.MultiDiGraph:
     """
-    Legge il GraphML salvato da OSMnx. Nel file tutti gli attributi sono testo: qui si
-    convertono in numeri quelli che servono (coordinate dei nodi e lunghezza degli archi).
-    node_type=int fa si' che gli id dei nodi siano interi, come il campo "osm" dei JSON.
+    Legge il GraphML salvato da OSMnx, dove tutti gli attributi sono testo: converte in
+    numeri coordinate e lunghezze, e gli id dei nodi in interi come il campo "osm" dei JSON.
     """
     G = nx.read_graphml(percorso, node_type=int)
     for _, dati in G.nodes(data=True):
@@ -122,11 +118,9 @@ def punti_arco(G: nx.MultiDiGraph, u: int, v: int, arco: dict) -> list[list[floa
 @lru_cache(maxsize=None)
 def percorso_piu_breve(G: nx.MultiDiGraph, da: int, a: int) -> tuple[float, list[list[float]]]:
     """
-    Percorso piu' breve da -> a sulla rete orientata, come in osm_city.py.
-    Restituisce (lunghezza in km, punti [lat, lon] da disegnare).
-
-    @lru_cache fa ricordare a Python i risultati gia' calcolati: se lo stesso percorso
-    serve di nuovo (lo stesso tratto in due obiettivi diversi) viene restituito subito.
+    Percorso più breve da -> a sulla rete orientata, come in osm_city.py: restituisce
+    (km, punti [lat, lon] da disegnare). È in cache perché lo stesso tratto torna in più
+    obiettivi.
     """
     nodi = nx.shortest_path(G, da, a, weight="length")
     metri = 0.0
@@ -185,10 +179,8 @@ def _come_lista(valore: str | None) -> list[str]:
 def vie_del_nodo(G: nx.MultiDiGraph, osm: int) -> str:
     """
     Nomi delle strade che toccano il nodo, es. "Via Paduina / Via Scipio Slataper".
-
-    Quasi tutti i nodi della rete sono incroci, quindi le strade sono spesso due o piu'.
-    Un arco con PIU' nomi e' un tratto semplificato che attraversa piu' strade, alcune
-    anche lontane dal nodo: i suoi nomi si usano solo se non c'e' niente di meglio.
+    Un arco con più nomi è un tratto semplificato che attraversa più strade, anche
+    lontane dal nodo: i suoi nomi si usano solo se non c'è niente di meglio.
     """
     archi = list(G.in_edges(osm, data=True)) + list(G.out_edges(osm, data=True))
     singoli, multipli, tipi = [], [], []
@@ -208,7 +200,7 @@ def vie_del_nodo(G: nx.MultiDiGraph, osm: int) -> str:
 
 
 # ----------------------------------------------------------------------
-# Blocco 2 — Rotte dei veicoli e pooling
+# Rotte dei veicoli e pooling
 # ----------------------------------------------------------------------
 # Gli eventi di una rotta si scrivono come li stampa results.descrivi():
 # +i = sale l'utente i, -i = scende l'utente i. Es. [16, 10, -16, 20, -20, -10].
@@ -258,6 +250,7 @@ def risolvi_rotte(grafo, obiettivo: str, time_limit: float) -> tuple[str, list[d
         schedule  orario di inizio servizio (schedule minimo, results.py)
     e il costo della rotta secondo il modello.
     """
+    # import qui dentro: senza Gurobi il resto dello script funziona lo stesso
     from objectives import costruisci_con_obiettivo
     from results import risolvi
 
@@ -362,11 +355,12 @@ def soluzione_assente(chiave: str, etichetta: str, messaggio: str, n: int) -> di
 
 
 # ----------------------------------------------------------------------
-# Blocco 3 — I dati di un'istanza per la mappa
+# Dati di un'istanza per la mappa
 # ----------------------------------------------------------------------
 
 def dati_istanza(percorso_json: Path, G: nx.MultiDiGraph, obiettivi: list[str],
                  risolvere: bool, time_limit: float) -> dict:
+    """Dati di un'istanza per la mappa: deposito, richieste con percorso diretto, una soluzione per obiettivo."""
     dati = json.loads(percorso_json.read_text(encoding="utf-8"))
     n = int(dati["n"])
     velocita = float(dati["velocita_kmh"])
@@ -464,7 +458,7 @@ def riassunto(ist: dict) -> str:
 
 
 # ----------------------------------------------------------------------
-# Blocco 4 — Programma principale
+# Programma principale
 # ----------------------------------------------------------------------
 
 def espandi(nomi: list[str]) -> list[Path]:
@@ -483,7 +477,7 @@ def espandi(nomi: list[str]) -> list[Path]:
 
 def gurobi_disponibile() -> bool:
     try:
-        import gurobipy  # noqa: F401  (serve solo sapere se c'e')
+        import gurobipy  # serve solo sapere se è installato
         return True
     except ImportError:
         return False
@@ -526,7 +520,7 @@ def main() -> None:
 
 
 # ----------------------------------------------------------------------
-# Blocco 5 — La pagina HTML (Leaflet). __DATI__ viene sostituito dai dati calcolati sopra.
+# Pagina HTML (Leaflet). __DATI__ viene sostituito dai dati calcolati sopra.
 # ----------------------------------------------------------------------
 
 MODELLO_HTML = r"""<!DOCTYPE html>
