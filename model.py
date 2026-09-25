@@ -21,11 +21,7 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from instances import Istanza
-from graph import Grafo, Nodo, Arco, localita_id
-
-# Tolleranza sui confronti float. I dati Cordeau cadono spesso esattamente sui
-# bordi delle finestre, quindi i test di segno vanno fatti con un margine.
-EPS = 1e-9
+from graph import Grafo, Nodo, Arco, localita_id, EPS
 
 VARIANTI = ("I", "II")
 
@@ -83,18 +79,14 @@ def calcola_M_ride(istanza: Istanza) -> dict[int, float]:
         M[i] = max(0.0, grezzo)
     return M
 
-
 def calcola_M_tilde(grafo: Grafo,
-                    coda: dict[Nodo, int] | None = None,
-                    testa: dict[Nodo, int] | None = None) -> dict[Arco, float]:
+                        coda: dict[Nodo, int],
+                        testa: dict[Nodo, int]) -> dict[Arco, float]:
     """
     Big-M dei vincoli (2b)/(9b), Sez. 3.3: M~ = l_v + s_v + t_(v,w) - e_w, il più piccolo
     valore che disattiva il vincolo ad arco spento (caso peggiore B_v = l_v, B_w = e_w).
     """
     istanza = grafo.istanza
-    if coda is None or testa is None:
-        coda, testa = mappa_localita(grafo)
-
     M: dict[Arco, float] = {}
     for arco in grafo.archi:
         v, w = arco
@@ -119,18 +111,12 @@ def finestra_deposito(istanza: Istanza) -> tuple[float, float]:
         )
     return lb, ub
 
-
-def finestre_nodi(grafo: Grafo, coda: dict[Nodo, int] | None = None) -> dict[Nodo, tuple[float, float]]:
+def finestre_nodi(grafo: Grafo, coda: dict[Nodo, int]) -> dict[Nodo, tuple[float, float]]:
     """
     Bound [e_j, l_j] di ogni B_v, con j la località fisica di v: vincoli (2d) del Model I
     e parte di (9d)-(9f) del Model II, messi come lb/ub delle variabili e non come righe.
     """
-
     istanza = grafo.istanza
-
-    if coda is None:
-        coda, _ = mappa_localita(grafo)  # se la mappa non e' stata passata, la calcoliamo qui
-
     deposito = grafo.deposito()
     lb_dep, ub_dep = finestra_deposito(istanza)
 
@@ -153,12 +139,10 @@ def costruisci_modello(
         *,
         variante: str = "II",
         consenti_rifiuti: bool = False,
-        grado_entrante_unitario: bool = False,
         time_limit: float | None = None,
         mip_gap: float = 0.0,
         threads: int | None = None,
         log: bool = True,
-        nome: str | None = None,
 ) -> gp.Model:
     """
     Costruisce il MILP event-based con obiettivo f_c.
@@ -193,7 +177,7 @@ def costruisci_modello(
     costo = {a: grafo.costo(a) for a in archi}
     tempo = {a: grafo.tempo(a) for a in archi}
 
-    m = gp.Model(nome or f"DARP_event_{variante}_{istanza.nome}")
+    m = gp.Model(f"DARP_event_{variante}_{istanza.nome}")
     m.Params.OutputFlag = 1 if log else 0
     m.Params.MIPGap = mip_gap
     if time_limit is not None:
@@ -230,11 +214,6 @@ def costruisci_modello(
     else:
         _vincoli_tempo_modello_II(m, grafo, B, flusso_in, M_ride)
 
-    if grado_entrante_unitario:
-        for v in nodi:
-            if v != deposito:
-                m.addConstr(flusso_in[v] <= 1, name=f"grado_in[{etichetta(v)}]")
-
     # --- obiettivo ----------------------------------------------------
     if consenti_rifiuti:
         # senza un obiettivo che penalizzi i rifiuti Gurobi minimizzerebbe 0 e darebbe
@@ -260,18 +239,12 @@ def costruisci_modello(
     m._p = p
     m._d = None
     m._dmax = None
-    m._livelli = []       # vincoli di livello (criterio, vincolo), vedi objectives.py
-    m._nodi = nodi
     m._archi = archi
     m._deposito = deposito
-    m._flusso_in = flusso_in
-    m._flusso_out = flusso_out
     m._costo = costo
     m._tempo = tempo
     m._coda = coda
     m._testa = testa
-    m._M_ride = M_ride
-    m._M_tilde = M_tilde
 
     m.update()
     return m
@@ -400,7 +373,7 @@ if __name__ == "__main__":
 
     from instances import leggi_istanza
 
-    percorso = sys.argv[1] if len(sys.argv) > 1 else "a2-16.txt"
+    percorso = sys.argv[1] if len(sys.argv) > 1 else "dati_milp/a2-16.txt"
 
     istanza = leggi_istanza(percorso)
     grafo = Grafo.costruisci(istanza)
