@@ -1,26 +1,18 @@
 """
-esperimenti.py — Risolve le istanze Trieste con i sei obiettivi del paper e salva tutto
-in un CSV. Da quel CSV si ricavano poi le Tabelle 8-12.
+Risolve le istanze Trieste con Model II e sei degli obiettivi del paper e salva i
+risultati in un CSV, una riga per istanza e obiettivo, da cui tabelle.py ricava le
+Tabelle 8-12 (Sez. 4.2).
 
-Riferimento: Gaul, Klamroth & Stiglmayr (2022), EJOR 301(3), Sez. 4.2.
-
-Come funziona
--------------
-Per ogni istanza utilizzabile (quelle con K_stato = "tabella7", vedi imposta_K.py) e per
-ogni obiettivo, costruisce Model II, lo risolve e scrive UNA RIGA nel CSV.
-
-La riga viene scritta subito dopo il run, non alla fine. Due conseguenze pratiche:
-    - se il PC si ferma, il lavoro fatto resta;
-    - rilanciando lo stesso comando, i run gia' presenti nel CSV vengono saltati.
-Per rifare un run basta cancellare la sua riga dal CSV (si apre con un foglio di calcolo).
-
-Le istanze sono elaborate dalla piu' piccola alla piu' grande, cosi' i primi risultati
-arrivano in fretta e ci si accorge presto di eventuali problemi.
+Si usano solo le istanze con K_stato = "tabella7" (vedi imposta_k.py), dalla più
+piccola alla più grande, così i primi risultati arrivano in fretta.
+Ogni riga viene scritta appena finito il run: se il PC si ferma il lavoro fatto resta,
+e rilanciando lo stesso comando i run già presenti nel CSV vengono saltati. Per rifare
+un run basta cancellarne la riga dal CSV.
 
 Uso (dalla cartella del progetto):
-    python esperimenti.py OpenStreetMap\\istanze_trieste
-    python esperimenti.py <cartella> --time-limit 600 --threads 4
-    python esperimenti.py <cartella> --solo Trieste_Q3.20.1 --obiettivi fc fr
+    python esperimenti.py istanze_trieste
+    python esperimenti.py istanze_trieste --time-limit 600 --threads 4
+    python esperimenti.py istanze_trieste --solo Trieste_Q3.20.1 --obiettivi fc fr
 """
 
 import argparse
@@ -39,7 +31,7 @@ from imposta_k import istanze_osm, istanza_utilizzabile
 # (fn non c'e': nel paper non ha tabelle sulle istanze urbane.)
 OBIETTIVI_PAPER = ("fc", "fr", "fcr", "frcr", "frmax", "fcrmax")
 
-# Colonne del CSV, in quest'ordine. Le prime quattro identificano il run.
+# Colonne del CSV, in quest'ordine; un run è identificato da istanza e obiettivo.
 CAMPI = [
     "istanza", "Q", "n", "K", "obiettivo", "variante",
     "stato", "obj", "bound", "gap", "tempo", "nodi_bb", "veicoli",
@@ -86,7 +78,7 @@ def esegui_uno(grafo: Grafo, obiettivo: str, *, time_limit: float,
                                      threads=threads)
         r = risolvi(m)
         return {**comune, **r.riga()}
-    except Exception as errore:                      # noqa: BLE001 - qui va bene prendere tutto
+    except Exception as errore:
         return {**comune, "stato": "errore", "nota": f"{type(errore).__name__}: {errore}"}
 
 
@@ -101,7 +93,7 @@ def elabora(cartella: Path, csv_path: Path, obiettivi: tuple[str, ...], *,
     if solo:
         percorsi = [p for p in percorsi if p.stem in solo]
     if not percorsi:
-        raise SystemExit("nessuna istanza utilizzabile: lanciare prima imposta_K.py")
+        raise SystemExit("nessuna istanza utilizzabile: lanciare prima imposta_k.py")
 
     # dalla piu' piccola alla piu' grande
     istanze = sorted((leggi_istanza(p) for p in percorsi), key=lambda i: (i.n, i.Q, i.nome))
@@ -132,8 +124,8 @@ def elabora(cartella: Path, csv_path: Path, obiettivi: tuple[str, ...], *,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Esperimenti sulle istanze Trieste (Model II).")
     parser.add_argument("cartella", type=Path, help="cartella con i JSON")
-    parser.add_argument("--csv", type=Path, default=Path("risultati_trieste.csv"),
-                        help="file dei risultati (default risultati_trieste.csv)")
+    parser.add_argument("--csv", type=Path, default=Path("risultati/risultati_trieste.csv"),
+                        help="file dei risultati (default risultati/risultati_trieste.csv)")
     parser.add_argument("--time-limit", type=float, default=600.0,
                         help="secondi per ogni run (default 600)")
     parser.add_argument("--mip-gap", type=float, default=0.0,
