@@ -27,7 +27,7 @@ from instances import Istanza
 from model import costruisci_modello, etichetta
 
 # Tolleranza sui tempi letti dal solver (Gurobi lavora con tolleranze di circa 1e-6),
-# per questo è più larga dell'EPS = 1e-9 di model.py.
+# per questo è più larga dell'EPS = 1e-9 di graph.py e model.py.
 EPS = 1e-6
 
 CRITERI = ("costo", "regret", "regret_max", "rifiuti")
@@ -172,53 +172,6 @@ def espressione(m: gp.Model, criterio: str):
 
 
 # ----------------------------------------------------------------------
-# Vincoli di livello
-# ----------------------------------------------------------------------
-
-def _vincoli_livello(m: gp.Model) -> list:
-    """
-    Lista (criterio, vincolo) dei vincoli di livello presenti nel modello.
-    """
-    try:
-        return m._livelli
-    except AttributeError:
-        m._livelli = []
-        return m._livelli
-
-
-def soglia_con_tolleranza(valore: float, rel: float = 1e-6) -> float:
-    """
-    Soglia per la seconda fase del lessicografico: il valore più un piccolo margine
-    relativo, perché chiedere <= valore esatto può risultare infeasible per le tolleranze.
-    """
-    return valore + rel * max(1.0, abs(valore))
-
-
-def aggiungi_vincolo_livello(m: gp.Model, criterio: str, soglia: float,
-                             *, nome: str | None = None) -> gp.Constr:
-    """
-    Aggiunge il vincolo criterio <= soglia e lo restituisce (seconda fase del
-    lessicografico, vedi results.risolvi_lessicografico).
-    """
-    vincolo = m.addConstr(espressione(m, criterio) <= soglia,
-                          name=nome or f"livello[{criterio}]")
-    _vincoli_livello(m).append((criterio, vincolo))
-    m.update()
-    return vincolo
-
-
-def rimuovi_vincolo_livello(m: gp.Model, vincolo: gp.Constr) -> None:
-    """Toglie un vincolo di livello dal modello e dal registro."""
-    registro = _vincoli_livello(m)
-    rimasti = [(c, v) for c, v in registro if v is not vincolo]
-    if len(rimasti) == len(registro):
-        raise ValueError("il vincolo non e' un vincolo di livello di questo modello")
-    m.remove(vincolo)
-    registro[:] = rimasti
-    m.update()
-
-
-# ----------------------------------------------------------------------
 # Obiettivo
 # ----------------------------------------------------------------------
 
@@ -238,11 +191,9 @@ def imposta_somma_pesata(m: gp.Model, *, costo: float = 0.0, regret: float = 0.0
     if all(w == 0 for w in pesi.values()):
         raise ValueError(f"{nome}: almeno un peso deve essere positivo")
 
-    rifiuti_limitati = any(c == "rifiuti" for c, _ in _vincoli_livello(m))
-    if m._p is not None and rifiuti == 0 and not rifiuti_limitati:
+    if m._p is not None and rifiuti == 0:
         raise ValueError(f"{nome}: il modello consente rifiuti ma l'obiettivo non li "
-                         "penalizza e nessun vincolo di livello li limita: l'ottimo "
-                         "sarebbe la soluzione vuota")
+                         "penalizza: l'ottimo sarebbe la soluzione vuota")
     if m._p is None and rifiuti > 0:
         raise ValueError(f"{nome}: il peso sui rifiuti richiede un modello costruito "
                          "con consenti_rifiuti=True")
@@ -327,66 +278,3 @@ def valore_obiettivo(coeff: dict[str, float], criteri: dict[str, float]) -> floa
     Valore dell'obiettivo ricalcolato dai criteri (coeff: criterio -> peso, es. m._coefficienti).
     """
     return sum(peso * criteri[c] for c, peso in coeff.items())
-
-
-# ----------------------------------------------------------------------
-# Verifica rapida: python objectives.py [istanza]
-# ----------------------------------------------------------------------
-
-if __name__ == "__main__":
-    import sys
-
-    from instances import leggi_istanza
-    from model import VARIANTI
-
-    def criteri_grezzi(m: gp.Model) -> dict[str, float]:
-        """
-        Criteri calcolati dai valori B.X restituiti dal solver.
-        """
-        istanza = m._istanza
-        costo_rotte = sum(m._costo[a] for a in m._archi if m._x[a].X > 0.5)
-        arrivi = {}
-        for i in istanza.utenti():
-            attivi = [v for v in m._grafo.nodi_delivery(i)
-                      if m._flusso_in[v].getValue() > 0.5]
-            if attivi:
-                arrivi[i] = m._B[attivi[0]].X
-        return valuta_criteri(istanza, costo_rotte, arrivi)
-
-    percorso = sys.argv[1] if len(sys.argv) > 1 else "dati_milp/a2-16.txt"
-    istanza = leggi_istanza(percorso)
-    grafo = Grafo.costruisci(istanza)
-    print(f"{istanza.nome}: n = {istanza.n}, pesi del paper = {pesi_paper(istanza.n)}")
-    print(f"{'obiettivo':<9} {'Model I':>11} {'Model II':>11} {'serviti':>8}  controlli")
-
-    tutto_ok = True
-    for nome in OBIETTIVI:
-        valori, serviti, controlli = {}, "", []
-        for variante in VARIANTI:
-            m = costruisci_con_obiettivo(grafo, nome, variante=variante, log=False)
-            m.optimize()
-            if m.SolCount == 0:
-                valori[variante] = None
-                controlli.append(f"{variante}: nessuna soluzione (status {m.Status})")
-                continue
-            valori[variante] = m.ObjVal
-
-            # l'obiettivo ricalcolato dai criteri deve coincidere con ObjVal
-            criteri = criteri_grezzi(m)
-            ricalcolato = valore_obiettivo(m._coefficienti, criteri)
-            if abs(ricalcolato - m.ObjVal) > 1e-4 * max(1.0, abs(m.ObjVal)):
-                controlli.append(f"{variante}: obbiettivo ricalcolato diverso ({ricalcolato:.4f})")
-            if m._p is not None:
-                serviti = f"{istanza.n - round(criteri['rifiuti'])}/{istanza.n}"
-
-        # Model I e Model II sono equivalenti: devono trovare lo stesso ottimo.
-        if None not in valori.values() and abs(valori["I"] - valori["II"]) > 1e-4:
-            controlli.append("Model I e II DIVERSI")
-        tutto_ok = tutto_ok and not controlli
-
-        testo = [f"{valori[v]:11.4f}" if valori[v] is not None else f"{'-':>11}"
-                 for v in VARIANTI]
-        print(f"{nome:<9} {testo[0]} {testo[1]} {serviti:>8}  "
-              f"{'; '.join(controlli) or 'OK'}")
-
-    print("\nTutti i controlli superati." if tutto_ok else "\nCi sono controlli falliti.")
