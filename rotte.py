@@ -1,34 +1,24 @@
 """
-rotte.py — Tabelle 13 e 14 del paper: le rotte dei veicoli di una singola istanza.
+Tabelle 13 e 14 del paper: le rotte dei veicoli di una singola istanza, risolta con
+due obiettivi diversi (nel paper f_cr e f_rcr sull'istanza Q3n20.5). Per ogni veicolo
+stampa la sequenza degli eventi con l'orario di ciascuno.
 
-Le Tabelle 8-12 (tabelle.py) sono medie su decine di istanze: dicono come si comportano
-gli obiettivi in generale, ma non fanno vedere nessuna soluzione. Le Tabelle 13 e 14
-servono proprio a questo: prendono UNA istanza piccola, la risolvono due volte con due
-obiettivi diversi e stampano, veicolo per veicolo, la sequenza degli eventi con l'orario
-di ciascuno. Nel paper sono la Tabella 13 (obiettivo f_cr) e la Tabella 14 (f_rcr)
-sull'istanza Q3n20.5.
+I run vanno rifatti: il CSV di esperimenti.py registra quanti veicoli sono stati usati,
+non dove sono passati e a che ora. Su un'istanza da 20 utenti bastano pochi secondi.
 
-A differenza di tabelle.py, qui i run vanno rifatti: il CSV di esperimenti.py registra
-quanti veicoli sono stati usati, non dove sono passati e a che ora. Su un'istanza da 20
-utenti sono pochi secondi.
+Per ogni obiettivo stampa un riepilogo, una tabella per veicolo ("Location" con gli
+eventi, "Time[m]" con gli orari), gli utenti con regret positivo e quelli rifiutati.
+Con due obiettivi aggiunge un confronto finale, chi viene rifiutato e a chi cambia il
+regret, come nel commento del paper alle Figure 2 e 3.
 
-Cosa stampa, per ogni obiettivo:
-  - una riga di riepilogo (costo, regret, serviti, veicoli, tempo di calcolo);
-  - una tabella per veicolo: "Location" con gli eventi, "Time[m]" con gli orari;
-  - gli utenti con regret positivo, che sono quelli citati nel commento del paper;
-  - gli utenti rifiutati, se l'obiettivo li consente (f_rcr).
-Con due obiettivi aggiunge un confronto finale: chi viene rifiutato e a chi cambia il
-regret. E' il contenuto del paragrafo che nel paper accompagna le Figure 2 e 3.
-
-Notazione, la stessa del paper:
-    15+   l'utente 15 sale        15-   l'utente 15 scende
-Gli orari sono minuti dall'inizio del servizio e sono presi dallo schedule minimo della
-rotta (graph.schedule_minimo), non dai B del solver: dipendono solo dal percorso, quindi
-sono riproducibili. Il deposito non compare, come nelle tabelle del paper.
+Notazione del paper: 15+ l'utente 15 sale, 15- l'utente 15 scende. Gli orari sono
+minuti dall'inizio del servizio, presi dallo schedule minimo della rotta
+(graph.schedule_minimo) e non dai B del solver, quindi riproducibili. Il deposito non
+compare, come nelle tabelle del paper.
 
 Uso (dalla cartella del progetto):
-    python rotte.py OpenStreetMap\\istanze_trieste\\Trieste_Q3.20.5.json
-    python rotte.py <istanza> --obiettivi fcr frcr --salva tabelle
+    python rotte.py istanze_trieste/Trieste_Q3.20.5.json
+    python rotte.py <istanza> --obiettivi fcr frcr --salva tabelle --png tabelle
     python rotte.py <istanza> --obiettivi fc fr --time-limit 300
 """
 
@@ -51,19 +41,13 @@ TABELLA = {"fcr": "Tabella 13", "frcr": "Tabella 14"}
 
 
 # ----------------------------------------------------------------------
-# Blocco 1 — Eventi di una rotta
+# Eventi di una rotta
 # ----------------------------------------------------------------------
 
 def eventi(rotta: Rotta) -> list[tuple[str, float]]:
     """
-    Gli eventi di un veicolo, senza deposito: (etichetta, orario).
-
-    rotta.nodi e rotta.schedule hanno la stessa lunghezza e lo stesso indice, quindi la
-    posizione k e' lo stesso evento in entrambi. Il primo e l'ultimo nodo sono il
-    deposito di partenza e di rientro: si saltano con [1:-1], come fa results.descrivi.
-
-    Nel nodo, il primo elemento della tupla porta segno e utente dell'evento:
-    positivo = sale, negativo = scende.
+    Gli eventi di un veicolo, senza il deposito iniziale e finale: (etichetta, orario).
+    L'etichetta viene dalla prima componente del nodo: positiva sale, negativa scende.
     """
     lista = []
     for k in range(1, len(rotta.nodi) - 1):
@@ -88,7 +72,7 @@ def regret_per_utente(risultato: Risultato, istanza) -> dict[int, float]:
 
 
 # ----------------------------------------------------------------------
-# Blocco 2 — Stampa in stile paper
+# Stampa in stile paper
 # ----------------------------------------------------------------------
 
 def stampa_tour(numero: int, rotta: Rotta) -> None:
@@ -180,7 +164,7 @@ def stampa_confronto(prima: Risultato, seconda: Risultato, istanza) -> None:
 
 
 # ----------------------------------------------------------------------
-# Blocco 3 — Immagine PNG
+# Immagine PNG
 # ----------------------------------------------------------------------
 
 # Misure del disegno, in pollici: le stesse proporzioni di tabelle.py.
@@ -192,11 +176,9 @@ MARGINE_BASSO = 0.30
 
 def png_soluzione(risultato: Risultato, istanza, percorso: Path) -> None:
     """
-    Disegna le rotte in un PNG da affiancare alla Tabella 13 o 14 del paper.
-
-    Le rotte hanno lunghezze diverse, quindi le colonne non possono essere dimensionate
-    sul contenuto come nelle Tabelle 8-12: si usa un passo unico, ricavato dalla cella
-    piu' larga, cosi' i veicoli restano incolonnati fra loro.
+    Disegna le rotte in un PNG da affiancare alla Tabella 13 o 14 del paper. Le rotte
+    hanno lunghezze diverse, quindi tutte le celle hanno la larghezza della più larga,
+    così i veicoli restano incolonnati fra loro.
     """
     try:
         import matplotlib
@@ -289,7 +271,7 @@ def png_soluzione(risultato: Risultato, istanza, percorso: Path) -> None:
 
 
 # ----------------------------------------------------------------------
-# Blocco 4 — Salvataggio
+# Salvataggio
 # ----------------------------------------------------------------------
 
 def salva(risultati: list[Risultato], istanza, cartella: Path) -> None:
@@ -317,6 +299,8 @@ def salva(risultati: list[Risultato], istanza, cartella: Path) -> None:
 
 
 # ----------------------------------------------------------------------
+# Programma principale
+#-----------------------------------------------------------------------
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Tabelle 13 e 14: rotte di una singola istanza.")
