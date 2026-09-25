@@ -270,15 +270,7 @@ def stampa(titolo: str, t: pd.DataFrame, blocchi: list,
     """Stampa la tabella a terminale con la doppia intestazione: blocco sopra, colonne sotto."""
     intestazione, corpo, spanne = celle(t, blocchi, indice)
 
-    larghezze = [max(len(intestazione[k]), *(len(r[k]) for r in corpo)) + 2
-                 for k in range(len(intestazione))]
-
-    # se l'etichetta di un blocco e' piu' larga delle sue colonne, le colonne si allargano
-    # quanto basta, altrimenti le etichette di due blocchi vicini si toccherebbero
-    for etichetta, inizio, quante in spanne:
-        manca = len(etichetta) + 2 - sum(larghezze[inizio:inizio + quante])
-        for j in range(max(manca, 0)):
-            larghezze[inizio + j % quante] += 1
+    larghezze = larghezze_colonne(intestazione, corpo, spanne)
 
     # prima riga di intestazione: il nome del blocco, centrato sulle sue colonne
     prima = ""
@@ -344,6 +336,19 @@ def celle(t: pd.DataFrame, blocchi: list,
         k += len(gruppo)
     return intestazione, corpo, spanne
 
+def larghezze_colonne(intestazione: list, corpo: list, spanne: list) -> list[int]:
+    """
+    Larghezza di ogni colonna in caratteri, dal contenuto più lungo. Se l'etichetta di un
+    blocco è più larga delle sue colonne, queste si allargano quanto basta, altrimenti le
+    etichette di due blocchi vicini si toccherebbero.
+    """
+    larghezze = [max(len(intestazione[k]), *(len(r[k]) for r in corpo)) + 2
+                 for k in range(len(intestazione))]
+    for etichetta, inizio, quante in spanne:
+        manca = len(etichetta) + 2 - sum(larghezze[inizio:inizio + quante])
+        for j in range(max(manca, 0)):
+            larghezze[inizio + j % quante] += 1
+    return larghezze
 
 def png(titolo: str, sottotitolo: str, t: pd.DataFrame, blocchi: list, percorso: Path,
         indice: tuple = ("Q", "n")) -> None:
@@ -360,13 +365,7 @@ def png(titolo: str, sottotitolo: str, t: pd.DataFrame, blocchi: list, percorso:
 
     intestazione, corpo, spanne = celle(t, blocchi, indice)
 
-    # larghezza di ogni colonna in caratteri, dal contenuto piu' lungo
-    larghezze = [max(len(intestazione[k]), *(len(r[k]) for r in corpo)) + 2
-                 for k in range(len(intestazione))]
-    for etichetta, inizio, quante in spanne:
-        manca = len(etichetta) + 2 - sum(larghezze[inizio:inizio + quante])
-        for j in range(max(manca, 0)):
-            larghezze[inizio + j % quante] += 1
+    larghezze = larghezze_colonne(intestazione, corpo, spanne)
 
     totale = sum(larghezze)
 
@@ -470,13 +469,13 @@ PAPER = {
 }
 
 # Quali indicatori mettere a confronto, nell'ordine in cui compaiono nella tabella.
-CONFRONTO = [("fr_vs_fc", "f_r vs f_c", ["d_f_c", "d_f_r"]),
-             ("fcr_vs_fc", "f_cr vs f_c", ["d_f_c"]),
-             ("fcr_vs_fr", "f_cr vs f_r", ["d_f_r"]),
-             ("frmax_vs_fc", "f_rmax vs f_c", ["d_f_c", "d_f_r"]),
-             ("fcrmax_vs_frmax", "f_crmax vs f_rmax", ["d_f_rmax"]),
-             ("fcrmax_vs_fcr", "f_crmax vs f_cr", ["d_f_r"]),
-             ("frcr_vs_fcr", "f_rcr vs f_cr", ["d_f_c", "d_f_r", "d_a.r."])]
+CONFRONTO_PAPER = [("fr_vs_fc", "f_r vs f_c", ["d_f_c", "d_f_r"]),
+                ("fcr_vs_fc", "f_cr vs f_c", ["d_f_c"]),
+                ("fcr_vs_fr", "f_cr vs f_r", ["d_f_r"]),
+                ("frmax_vs_fc", "f_rmax vs f_c", ["d_f_c", "d_f_r"]),
+                ("fcrmax_vs_frmax", "f_crmax vs f_rmax", ["d_f_rmax"]),
+                ("fcrmax_vs_fcr", "f_crmax vs f_cr", ["d_f_r"]),
+                ("frcr_vs_fcr", "f_rcr vs f_cr", ["d_f_c", "d_f_r", "d_a.r."])]
 
 
 def tabella_confronto(d: pd.DataFrame) -> tuple[pd.DataFrame, list]:
@@ -487,7 +486,7 @@ def tabella_confronto(d: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     """
     variazioni = {11: tabella_variazioni(d, 11)[0], 12: tabella_variazioni(d, 12)[0]}
 
-    ordinate = [f"{prefisso}|{c}" for prefisso, _, colonne in CONFRONTO for c in colonne]
+    ordinate = [f"{prefisso}|{c}" for prefisso, _, colonne in CONFRONTO_PAPER for c in colonne]
     righe = {}
     for q in (3, 6):
         nostri = {}
@@ -501,8 +500,7 @@ def tabella_confronto(d: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     t.index = pd.MultiIndex.from_tuples(t.index, names=["Q", "dati"])
     t["note"] = ""
 
-    blocchi = [(prefisso, etichetta, colonne) for prefisso, etichetta, colonne in CONFRONTO]
-    return t, blocchi
+    return t, list(CONFRONTO_PAPER)
 
 
 def costruisci(d: pd.DataFrame, numero: int) -> tuple[pd.DataFrame, list]:
