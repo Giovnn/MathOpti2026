@@ -17,9 +17,7 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from graph import Grafo, Nodo, Arco, schedule_minimo
-from objectives import (Pesi, costruisci_con_obiettivo, imposta_obiettivo,
-                        aggiungi_vincolo_livello, soglia_con_tolleranza,
-                        valuta_criteri, valore_obiettivo)
+from objectives import costruisci_con_obiettivo, valuta_criteri, valore_obiettivo
 
 # Tolleranza relativa sui controlli di coerenza fra valori del solver e valori ricalcolati.
 TOL = 1e-6
@@ -51,20 +49,12 @@ def nome_stato(codice: int) -> str:
 class Rotta:
     """
     Giro di un veicolo dal deposito al deposito.
-    nodi, localita e schedule sono allineati per posizione; archi e tempi hanno
-    un elemento in meno.
+    nodi, localita e schedule sono allineati per posizione.
     """
-    archi: list[Arco]
     nodi: list[Nodo]              # [deposito, v1, ..., vk, deposito]
     localita: list[int]           # id fisici; il deposito compare come iniziale e finale
-    tempi: list[float]            # tempi di percorrenza degli archi (m._tempo)
     costo: float
     schedule: list[float]         # schedule minimo, uno per posizione
-
-    @property
-    def utenti(self) -> list[int]:
-        """Utenti serviti, nell'ordine in cui salgono."""
-        return [v[0] for v in self.nodi if v[0] > 0]
 
     def vincoli_ride(self) -> list[tuple[int, int]]:
         """Coppie (posizione del pickup, posizione del drop-off), una per utente."""
@@ -92,7 +82,7 @@ def _costruisci_rotta(m: gp.Model, archi: list[Arco]) -> Rotta:
         raise RuntimeError(f"rotta incoerente: salgono {sorted(salite)}, "
                            f"scendono {sorted(discese)}")
 
-    provvisoria = Rotta(archi, nodi, localita, tempi, costo, schedule=[])
+    provvisoria = Rotta(nodi, localita, costo, schedule=[])
     schedule = schedule_minimo(localita, provvisoria.vincoli_ride(), istanza, tempi)
     if schedule is None:
         raise RuntimeError(
@@ -257,39 +247,6 @@ def controlli(r: Risultato) -> list[str]:
 
 
 # ----------------------------------------------------------------------
-# Lessicografico in due fasi
-# ----------------------------------------------------------------------
-
-# obiettivo puro -> criterio da vincolare nella seconda fase
-CRITERIO_PRIMARIO = {"fr": "regret", "frmax": "regret_max", "fn": "rifiuti"}
-
-
-def risolvi_lessicografico(grafo: Grafo, primario: str, secondario: str = "fc", *,
-                           pesi: Pesi | None = None,
-                           **opzioni_modello) -> tuple[Risultato, Risultato | None]:
-    """
-    Prima fase: ottimizza l'obiettivo puro `primario`. Seconda fase: vincola quel
-    criterio al valore trovato (con tolleranza) e ottimizza `secondario`.
-    Se la prima fase non arriva all'ottimo, la seconda restituisce None.
-    """
-    if primario not in CRITERIO_PRIMARIO:
-        raise ValueError(f"primario deve essere un obiettivo puro: "
-                         f"{sorted(CRITERIO_PRIMARIO)}, ricevuto {primario!r}")
-
-    m = costruisci_con_obiettivo(grafo, primario, pesi=pesi, **opzioni_modello)
-    prima = risolvi(m)
-    if not prima.ottimo:
-        return prima, None
-
-    aggiungi_vincolo_livello(m, CRITERIO_PRIMARIO[primario],
-                             soglia_con_tolleranza(prima.obj))
-    imposta_obiettivo(m, secondario, pesi)
-    seconda = risolvi(m)
-    seconda.obiettivo = f"{primario}>{secondario}"
-    return prima, seconda
-
-
-# ----------------------------------------------------------------------
 # Stampa
 # ----------------------------------------------------------------------
 
@@ -333,9 +290,5 @@ if __name__ == "__main__":
         esiti.append(r)
         print(descrivi(r) + "\n")
 
-    prima, seconda = risolvi_lessicografico(grafo, "fr", log=False)
-    esiti += [prima, seconda]
-    print(descrivi(seconda) + "\n")
-
-    problemi = [f"{e.obiettivo}: {p}" for e in esiti if e is not None for p in controlli(e)]
+    problemi = [f"{e.obiettivo}: {p}" for e in esiti for p in controlli(e)]
     print("\n".join(problemi) if problemi else "Controlli di coerenza superati.")
