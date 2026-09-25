@@ -191,10 +191,10 @@ def elabora(cartella: Path, verifica, *, scrivi: bool,
     problemi = []
     print(f"{'istanza':<22}{'Q':>3}{'n':>5}  {'tab.7':<8}{'esiti':<34}K")
     for path in istanze:
-        istanza = leggi_istanza(path)
-        intervallo = intervallo_tabella_7(istanza.Q, istanza.n)
-        grafo = Grafo.costruisci(istanza)
         try:
+            istanza = leggi_istanza(path)
+            intervallo = intervallo_tabella_7(istanza.Q, istanza.n)
+            grafo = Grafo.costruisci(istanza)
             K, esiti = scegli_K(grafo, intervallo, verifica)
         except ValueError as errore:
             # un'istanza con dati incoerenti non deve fermare le altre 59:
