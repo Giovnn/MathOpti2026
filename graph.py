@@ -42,29 +42,7 @@ Arco = tuple[Nodo, Nodo]
 
 EPS = 1e-9  # tolleranza sui confronti float (i ride time cadono spesso esattamente su L)
 
-METODI_FATTIBILITA = ("esatto", "forward")
-_metodo_fattibilita = "esatto"
 
-
-def imposta_metodo_fattibilita(metodo: str) -> None:
-    """
-    Sceglie l'implementazione di f1/f2 usata dal resto del modulo.
-    "esatto": esiste uno schedule ammissibile (definizione del paper).
-    "forward": è ammissibile lo schedule "tutto il prima possibile", condizione
-    più stretta, tenuta solo per confronto.
-    """
-    global _metodo_fattibilita
-    if metodo not in METODI_FATTIBILITA:
-        raise ValueError(f"metodo non valido: {metodo!r} (attesi {METODI_FATTIBILITA})")
-    _metodo_fattibilita = metodo
-
-
-def metodo_fattibilita() -> str:
-    """Implementazione di f1/f2 attualmente attiva."""
-    return _metodo_fattibilita
-
-
-# --- implementazione esatta (default) ---------------------------------
 
 def schedule_minimo(sequenza_id: list[int],
                     vincoli_ride: list[tuple[int, int]],
@@ -133,88 +111,22 @@ def _esiste_schedule(sequenza_id: list[int],
     return schedule_minimo(sequenza_id, vincoli_ride, istanza) is not None
 
 
-def _f1_esatto(i: int, j: int, istanza: Istanza) -> bool:
+def f1(i: int, j: int, istanza: Istanza) -> bool:
+    """Fattibilità di j+ -> i+ -> j- -> i- (ride time e finestre)."""
+    if i == 0 or j == 0:
+        return True
     sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
                 istanza.delivery(j).id, istanza.delivery(i).id]
     return _esiste_schedule(sequenza, [(1, 3), (0, 2)], istanza)
 
 
-def _f2_esatto(i: int, j: int, istanza: Istanza) -> bool:
+def f2(i: int, j: int, istanza: Istanza) -> bool:
+    """Fattibilità di j+ -> i+ -> i- -> j- (ride time e finestre)."""
+    if i == 0 or j == 0:
+        return True
     sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
                 istanza.delivery(i).id, istanza.delivery(j).id]
     return _esiste_schedule(sequenza, [(1, 2), (0, 3)], istanza)
-
-
-# --- implementazione forward (variante di confronto) ------------------
-
-def _orari_fattibili(sequenza_id: list[int], istanza: Istanza) -> list[float] | None:
-    """
-    Simula in avanti i tempi di inizio servizio lungo una sequenza fissa di località,
-    scegliendo sempre l'orario più presto possibile. Ritorna None se una finestra
-    temporale viene violata.
-
-    Questo schedule rispetta le finestre ma non è detto che minimizzi i ride time: ogni
-    attesa a bordo li allunga. Usato solo dalla variante "forward" di f1/f2.
-    """
-    B: list[float] = []
-    for idx, id_nodo in enumerate(sequenza_id):
-        nodo = istanza.nodo(id_nodo)
-        if idx == 0:
-            arrivo = nodo.e  # nessun vincolo a monte: nel caso migliore si arriva ad e
-        else:
-            id_prec = sequenza_id[idx - 1]
-            nodo_prec = istanza.nodo(id_prec)
-            arrivo = B[idx - 1] + nodo_prec.servizio + istanza.tempo(id_prec, id_nodo)
-        inizio = max(arrivo, nodo.e)
-        if inizio > nodo.l + EPS:
-            return None
-        B.append(inizio)
-    return B
-
-
-def _f_forward(sequenza: list[int], vincoli_ride: list[tuple[int, int]],
-               istanza: Istanza) -> bool:
-    B = _orari_fattibili(sequenza, istanza)
-    if B is None:
-        return False
-    for pos_p, pos_d in vincoli_ride:
-        s_p = istanza.nodo(sequenza[pos_p]).servizio
-        L_i = istanza.ride_max(istanza.utente(sequenza[pos_p]))
-        if B[pos_d] - (B[pos_p] + s_p) > L_i + EPS:
-            return False
-    return True
-
-
-def _f1_forward(i: int, j: int, istanza: Istanza) -> bool:
-    sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
-                istanza.delivery(j).id, istanza.delivery(i).id]
-    return _f_forward(sequenza, [(1, 3), (0, 2)], istanza)
-
-
-def _f2_forward(i: int, j: int, istanza: Istanza) -> bool:
-    sequenza = [istanza.pickup(j).id, istanza.pickup(i).id,
-                istanza.delivery(i).id, istanza.delivery(j).id]
-    return _f_forward(sequenza, [(1, 2), (0, 3)], istanza)
-
-
-# --- interfaccia pubblica ---------------------------------------------
-
-def f1(i: int, j: int, istanza: Istanza) -> bool:
-    """Fattibilita' della sequenza j+ -> i+ -> j- -> i- (ride time e finestre)."""
-    if i == 0 or j == 0:
-        return True
-    if _metodo_fattibilita == "esatto":
-        return _f1_esatto(i, j, istanza)
-    return _f1_forward(i, j, istanza)
-
-
-def f2(i: int, j: int, istanza: Istanza) -> bool:
-    """Fattibilita' della sequenza j+ -> i+ -> i- -> j- (ride time e finestre)."""
-    if i == 0 or j == 0:
-        return True
-    if _metodo_fattibilita == "esatto":
-        return _f2_esatto(i, j, istanza)
-    return _f2_forward(i, j, istanza)
 
 
 # ----------------------------------------------------------------------
@@ -294,21 +206,13 @@ def genera_nodi(istanza: Istanza) -> set[Nodo]:
 # prima/dopo la transizione. I nodi sono già in forma canonica, quindi confrontare
 # insiemi di interi basta, tranne in A3 dove il paper confronta le tuple v2..vQ direttamente.
 
-def _pickup_index(grafo: "Grafo") -> dict[int, list[Nodo]]:
-    return {i: grafo.nodi_pickup(i) for i in grafo.istanza.utenti()}
-
-
-def _delivery_index(grafo: "Grafo") -> dict[int, list[Nodo]]:
-    return {i: grafo.nodi_delivery(i) for i in grafo.istanza.utenti()}
-
-
 def genera_archi(grafo: "Grafo") -> set[Arco]:
     istanza = grafo.istanza
     deposito = grafo.deposito()
     zero_pad = (0,) * (istanza.Q - 1)
 
-    pickup_di = _pickup_index(grafo)
-    delivery_di = _delivery_index(grafo)
+    pickup_di = {i: grafo.nodi_pickup(i) for i in istanza.utenti()}
+    delivery_di = {i: grafo.nodi_delivery(i) for i in istanza.utenti()}
 
     archi: set[Arco] = set()
 
@@ -397,17 +301,6 @@ def _localita_arco(arco: Arco, istanza: Istanza) -> tuple[int, int]:
     return (localita_id(v, istanza, is_partenza=True),
             localita_id(w, istanza, is_partenza=False))
 
-
-def costo_arco(arco: Arco, istanza: Istanza) -> float:
-    """c_a: costo di routing dell'arco (Cordeau: distanza euclidea; OSM: km su strada)."""
-    return istanza.costo(*_localita_arco(arco, istanza))
-
-
-def tempo_arco(arco: Arco, istanza: Istanza) -> float:
-    """t_a: tempo di viaggio dell'arco in minuti (Cordeau: = costo; OSM: 4 * costo a 15 km/h)."""
-    return istanza.tempo(*_localita_arco(arco, istanza))
-
-
 # ----------------------------------------------------------------------
 # Contenitore del grafo
 # ----------------------------------------------------------------------
@@ -437,7 +330,7 @@ class Grafo:
             self.delta_in[w].append(arco)
 
     # ------------------------------------------------------------------
-    # accesso semantico, comodo per i test e per model.py
+    # accesso ai nodi e agli archi, usato da model.py e objectives.py
     # ------------------------------------------------------------------
     def deposito(self) -> Nodo:
         return (0,) * self.istanza.Q
@@ -449,10 +342,12 @@ class Grafo:
         return [v for v in self.nodi if v[0] == -utente]
 
     def costo(self, arco: Arco) -> float:
-        return costo_arco(arco, self.istanza)
+        """c_a: costo di routing dell'arco (Cordeau: distanza euclidea; OSM: km su strada)."""
+        return self.istanza.costo(*_localita_arco(arco, self.istanza))
 
     def tempo(self, arco: Arco) -> float:
-        return tempo_arco(arco, self.istanza)
+        """t_a: tempo di viaggio dell'arco in minuti (Cordeau: = costo; OSM: 4 * costo a 15 km/h)."""
+        return self.istanza.tempo(*_localita_arco(arco, self.istanza))
 
 
 if __name__ == "__main__":
