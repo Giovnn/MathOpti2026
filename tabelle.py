@@ -1,9 +1,7 @@
 """
-tabelle.py — Dai risultati grezzi alle Tabelle 8-12 del paper.
-
-Legge il CSV prodotto da esperimenti.py (una riga per run: istanza x obiettivo) e ne
-ricava le cinque tabelle della Sezione 4.2 di Gaul, Klamroth & Stiglmayr (2022).
-Non risolve nulla: tutte le tabelle sono aggregazioni dello stesso file.
+Dai risultati di esperimenti.py alle Tabelle 8-12 della Sez. 4.2 del paper.
+Legge il CSV (una riga per istanza e obiettivo) e non risolve nulla: tutte le tabelle
+sono aggregazioni dello stesso file.
 
     Tabella 8    valori medi con gli obiettivi puri f_c e f_r
     Tabella 9    valori medi con gli obiettivi composti f_cr e f_rcr
@@ -11,29 +9,24 @@ Non risolve nulla: tutte le tabelle sono aggregazioni dello stesso file.
     Tabella 11   variazioni percentuali fra sei coppie di obiettivi
     Tabella 12   variazioni percentuali fra i tre obiettivi composti
 
-Le Tabelle 8, 9 e 10 contengono valori misurati; le Tabelle 11 e 12 non aggiungono
-nulla di nuovo, sono rapporti fra quei valori. Il calcolo pero' e' diverso:
-
-  - nelle Tabelle 8-10 si media dentro ogni gruppo (Q, n);
-  - nelle Tabelle 11-12 si calcola la variazione percentuale ISTANZA PER ISTANZA e
-    solo dopo si media. Le due cose non coincidono, e sulle colonne dei tempi la
-    differenza e' enorme, perche' si va da centesimi di secondo al time limit.
+Nelle Tabelle 8-10 si media dentro ogni gruppo (Q, n). Nelle Tabelle 11-12 si calcola
+prima la variazione percentuale istanza per istanza e solo dopo si media: i due calcoli
+non coincidono, e sui tempi la differenza è grande, perché vanno da centesimi di
+secondo al time limit.
 
 Convenzioni prese dal paper:
-  - i valori (costo, regret, gap, ...) si mediano solo sui run che hanno prodotto una
-    soluzione; dove qualche run non ne ha prodotta, sotto la tabella compare una nota;
-  - il tempo si media su tutti i run del gruppo: un run che esaurisce il time limit
-    senza soluzione e' comunque tempo speso;
-  - la riga Avg delle Tabelle 11 e 12 e' la media semplice delle sei righe della
-    famiglia, non una media pesata sul numero di istanze.
+  - costo, regret, gap, ... si mediano solo sui run con una soluzione; dove ne manca
+    qualcuna, sotto la tabella compare una nota;
+  - il tempo si media su tutti i run del gruppo, anche quelli senza soluzione;
+  - la riga Avg delle Tabelle 11 e 12 è la media semplice delle sei righe della
+    famiglia, non pesata sul numero di istanze.
 
-Nei nomi di colonna "d_" sta per la variazione percentuale (il Delta del paper);
-si evita il carattere greco per non avere problemi di codifica sul terminale.
+Nei nomi di colonna "d_" sta per la variazione percentuale (il Delta del paper).
 
 Uso (dalla cartella del progetto):
-    python tabelle.py risultati_trieste.csv
-    python tabelle.py risultati_trieste.csv --salva tabelle
-    python tabelle.py risultati_trieste.csv --tabelle 8 11
+    python tabelle.py risultati/risultati_trieste.csv
+    python tabelle.py risultati/risultati_trieste.csv --tabelle 8 11
+    python tabelle.py risultati/risultati_trieste.csv --salva tabelle --png tabelle --confronto
 """
 
 import argparse
@@ -54,10 +47,8 @@ VALORI = ["obj", "costo", "regret", "regret_max", "ar", "gap"]
 NOMI = {"fc": "f_c", "fr": "f_r", "fcr": "f_cr",
         "frcr": "f_rcr", "frmax": "f_rmax", "fcrmax": "f_crmax"}
 
-# Etichetta di colonna -> colonna da cui prendere il valore.
-# Per il regret si usano sempre le colonne canoniche (calcolate sullo schedule minimo),
-# mai quelle _grezzo: quando il regret non e' nell'obiettivo i valori del solver sono
-# arbitrari e sovrastimano (vedi results.py).
+# Etichetta di colonna -> colonna del CSV. Per il regret si usano le colonne canoniche
+# (schedule minimo), non quelle _grezzo: vedi results.py.
 SORGENTE = {"Obj.v.": "obj", "f_c": "costo", "f_r": "regret",
             "f_rmax": "regret_max", "a.r.": "ar", "Gap": "gap", "CPU": "CPU"}
 
@@ -74,8 +65,6 @@ STRUTTURA = {
 }
 
 # Struttura delle Tabelle 11 e 12: (obiettivo nuovo, obiettivo di riferimento, metriche).
-# Ogni coppia risponde a una domanda precisa, per questo le metriche cambiano da blocco
-# a blocco invece di essere sempre le stesse.
 CONFRONTI = {
     11: [("fr", "fc", ["f_c", "f_r"]),          # quanto costa passare al regret puro
          ("fcr", "fc", ["f_c", "CPU"]),         # quanto costa il compromesso
@@ -93,7 +82,7 @@ SORGENTE_VARIAZIONI = {"f_c": "costo", "f_r": "regret", "f_rmax": "regret_max",
 
 
 # ----------------------------------------------------------------------
-# Blocco 1 — Lettura
+# Lettura
 # ----------------------------------------------------------------------
 
 def leggi(percorso: Path) -> pd.DataFrame:
@@ -132,7 +121,7 @@ def numerosita(d: pd.DataFrame) -> pd.Series:
 
 
 # ----------------------------------------------------------------------
-# Blocco 2 — Medie per gruppo (Tabelle 8, 9, 10)
+# Medie per gruppo (Tabelle 8, 9, 10)
 # ----------------------------------------------------------------------
 
 def medie(d: pd.DataFrame, obiettivo: str) -> pd.DataFrame:
@@ -177,18 +166,15 @@ def tabella_medie(d: pd.DataFrame, numero: int) -> tuple[pd.DataFrame, list]:
 
 
 # ----------------------------------------------------------------------
-# Blocco 3 — Variazioni per istanza (Tabelle 11, 12)
+# Variazioni per istanza (Tabelle 11, 12)
 # ----------------------------------------------------------------------
 
 def variazione(d: pd.DataFrame, nuovo: str, base: str, colonna: str) -> pd.Series:
     """
-    Variazione percentuale fra due obiettivi, calcolata su ogni singola istanza.
-
-    Le due serie hanno lo stesso indice (Q, n, istanza), quindi pandas le appaia da
-    solo: la sottrazione confronta sempre la stessa istanza con se stessa.
-
-    Un'istanza senza soluzione con uno dei due obiettivi da' un valore vuoto e sparisce
-    dalla media; lo stesso vale se il riferimento e' zero (divisione impossibile).
+    Variazione percentuale fra due obiettivi su ogni singola istanza: le due serie sono
+    indicizzate per istanza, quindi la sottrazione confronta sempre la stessa istanza.
+    Un'istanza senza soluzione con uno dei due obiettivi, o con riferimento zero, dà un
+    valore vuoto e non entra nella media.
     """
     def serie(obiettivo: str) -> pd.Series:
         righe = d[d["obiettivo"] == obiettivo]
@@ -241,7 +227,7 @@ def aggiungi_avg(t: pd.DataFrame) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------
-# Blocco 4 — Note a pie' di tabella
+# Note a pie' di tabella
 # ----------------------------------------------------------------------
 
 def note(usate: dict[str, pd.Series], totale: pd.Series, verbo: str) -> pd.Series:
@@ -262,7 +248,7 @@ def note(usate: dict[str, pd.Series], totale: pd.Series, verbo: str) -> pd.Serie
 
 
 # ----------------------------------------------------------------------
-# Blocco 5 — Stampa e salvataggio
+# Stampa e salvataggio
 # ----------------------------------------------------------------------
 
 def formatta(nome: str, valore) -> str:
@@ -323,10 +309,10 @@ def salva(t: pd.DataFrame, cartella: Path, nome: str) -> None:
 
 
 # ----------------------------------------------------------------------
-# Blocco 6 — Immagine PNG
+# Immagine PNG
 # ----------------------------------------------------------------------
 
-# Misure del disegno, in pollici. Cambiarle qui cambia tutte le tabelle insieme.
+# Misure del disegno, in pollici
 PASSO_CARATTERE = 0.085      # larghezza di un carattere
 ALTEZZA_RIGA = 0.26          # altezza di una riga
 MARGINE_ALTO = 0.75          # spazio per titolo e sottotitolo
@@ -336,9 +322,8 @@ MARGINE_BASSO = 0.30         # spazio di base sotto la tabella
 def celle(t: pd.DataFrame, blocchi: list,
           indice: tuple = ("Q", "n")) -> tuple[list, list, list]:
     """
-    Prepara il contenuto della tabella come testo: le etichette dei blocchi, le
-    intestazioni di colonna e le righe di dati. E' lo stesso contenuto che finisce a
-    terminale, tenuto separato dal disegno in modo che i due restino allineati.
+    Contenuto della tabella come testo (etichette dei blocchi, intestazioni, righe di
+    dati), usato sia dalla stampa a terminale sia dal PNG.
     """
     colonne = [(prefisso, c) for prefisso, _, gruppo in blocchi for c in gruppo]
     intestazione = list(indice) + [c for _, c in colonne]
@@ -363,10 +348,8 @@ def celle(t: pd.DataFrame, blocchi: list,
 def png(titolo: str, sottotitolo: str, t: pd.DataFrame, blocchi: list, percorso: Path,
         indice: tuple = ("Q", "n")) -> None:
     """
-    Disegna la tabella in un PNG da affiancare a quella del paper nella relazione.
-
-    La tabella non e' un grafico: viene disegnata a mano scrivendo il testo alle
-    coordinate giuste, cosi' l'impaginazione resta identica a quella del terminale.
+    Disegna la tabella in un PNG da affiancare a quella del paper nella relazione: il
+    testo viene scritto cella per cella, così l'impaginazione è la stessa del terminale.
     """
     try:
         import matplotlib
@@ -468,7 +451,7 @@ TITOLI = {
 
 
 # ----------------------------------------------------------------------
-# Blocco 7 — Confronto con il paper
+# Confronto con il paper
 # ----------------------------------------------------------------------
 
 # Righe Avg delle Tabelle 11 e 12 del paper (Wuppertal), ricopiate dall'articolo.
@@ -498,11 +481,9 @@ CONFRONTO = [("fr_vs_fc", "f_r vs f_c", ["d_f_c", "d_f_r"]),
 
 def tabella_confronto(d: pd.DataFrame) -> tuple[pd.DataFrame, list]:
     """
-    Affianca le righe Avg del paper a quelle di Trieste, indicatore per indicatore.
-
-    E' la tabella che serve per rispondere alla domanda del progetto: le tendenze si
-    replicano? Qui si guardano i segni e gli ordini di grandezza, non i valori esatti:
-    le due citta', il solver e il time limit sono diversi.
+    Affianca, indicatore per indicatore, le righe Avg del paper (Wuppertal) a quelle di
+    Trieste. Contano i segni e gli ordini di grandezza, non i valori esatti: città,
+    solver e time limit sono diversi.
     """
     variazioni = {11: tabella_variazioni(d, 11)[0], 12: tabella_variazioni(d, 12)[0]}
 
@@ -531,6 +512,8 @@ def costruisci(d: pd.DataFrame, numero: int) -> tuple[pd.DataFrame, list]:
     return tabella_variazioni(d, numero)
 
 
+# ----------------------------------------------------------------------
+# Programma principale
 # ----------------------------------------------------------------------
 
 def sottotitolo(d: pd.DataFrame) -> str:
