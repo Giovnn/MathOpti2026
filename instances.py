@@ -46,18 +46,6 @@ class Nodo:
     e: float          # e_i : inizio finestra temporale
     l: float          # l_i : fine finestra temporale
 
-    @property
-    def is_pickup(self) -> bool:
-        return self.domanda > 0
-
-    @property
-    def is_delivery(self) -> bool:
-        return self.domanda < 0
-
-    @property
-    def is_deposito(self) -> bool:
-        return self.domanda == 0
-
 
 @dataclass
 class Istanza:
@@ -92,7 +80,7 @@ class Istanza:
         return self._per_id[id_nodo]
 
     # ------------------------------------------------------------------
-    # accesso semantico: la convenzione di numerazione vive SOLO qui
+    # accesso per ruolo: la numerazione dei nodi è definita solo qui
     # ------------------------------------------------------------------
     def pickup(self, utente: int) -> Nodo:
         """Nodo di pickup (i+) dell'utente i, con i in 1..n."""
@@ -132,23 +120,9 @@ class Istanza:
             raise ValueError(f"{self.nome}: nessun ride time massimo per l'utente {utente}")
         return self.L
 
-    def tipo_richiesta(self, utente: int) -> str:
-        """'inbound' (data la finestra di pickup) oppure 'outbound' (data quella di drop-off)."""
-        return self.tipo[utente]
-
     def su_rete_stradale(self) -> bool:
         """True per le istanze OSM: costi e tempi vengono da una matrice, non dalle coordinate."""
         return self._costo is not None
-
-    def stampa(self) -> str:
-        """Stringa di riepilogo leggibile, utile per il debug e per i log."""
-        return (
-            f"Istanza {self.nome}: n={self.n} richieste, K={self.K} veicoli, "
-            f"Q={self.Q}, {self._testo_L()}, T={self.T} min | {len(self.nodi)} nodi"
-        )
-
-    def _testo_L(self) -> str:
-        return f"L={self.L} min" if self.L is not None else "L_i per utente"
 
     # ------------------------------------------------------------------
     # costi e tempi di viaggio
@@ -165,21 +139,10 @@ class Istanza:
             return self._tempo[(id_a, id_b)]
         return self._euclidea(id_a, id_b)
 
-    def distanza(self, id_a: int, id_b: int) -> float:
-        """Distanza euclidea fra le coordinate. Solo Cordeau: su rete stradale e' ambigua
-        (costo o tempo?) e solleva un errore, cosi' un vecchio uso dimenticato non passa inosservato."""
-        if self.su_rete_stradale():
-            raise ValueError(f"{self.nome}: distanza() non vale su rete stradale: usare costo() o tempo()")
-        return self._euclidea(id_a, id_b)
-
     def _euclidea(self, id_a: int, id_b: int) -> float:
         a, b = self.nodo(id_a), self.nodo(id_b)
         return math.hypot(a.x - b.x, a.y - b.y)
 
-    def matrice_distanze(self) -> dict[tuple[int, int], float]:
-        """Dizionario {(id_a, id_b): costo} su tutte le coppie di nodi."""
-        ids = [nodo.id for nodo in self.nodi]
-        return {(a, b): self.costo(a, b) for a in ids for b in ids}
 
 
 # ======================================================================
@@ -270,7 +233,7 @@ def leggi_istanza_json(path: str | Path) -> Istanza:
 # verifiche
 # ======================================================================
 def verifica_istanza(istanza: Istanza) -> None:
-    """Controlli di coerenza sui dati letti. Fallisce rumorosamente se qualcosa non torna."""
+    """Controlli di coerenza sui dati letti: ValueError al primo che non torna."""
     attesi = 2 * istanza.n + 2
     if len(istanza.nodi) != attesi:
         raise ValueError(
@@ -366,7 +329,7 @@ def verifica_finestre_derivate(istanza: Istanza, tolleranza: float = TOLLERANZA_
     coincida con l'eq. (5)/(6) ricalcolata con i tempi e gli L_i del file.
     """
     for i in istanza.utenti():
-        tipo = istanza.tipo_richiesta(i)
+        tipo = istanza.tipo[i]
         e_atteso, l_atteso = finestra_derivata(istanza, i, tipo)
         derivato = istanza.delivery(i) if tipo == "inbound" else istanza.pickup(i)
         if abs(derivato.e - e_atteso) > tolleranza or abs(derivato.l - l_atteso) > tolleranza:
@@ -378,16 +341,17 @@ def verifica_finestre_derivate(istanza: Istanza, tolleranza: float = TOLLERANZA_
 
 def riassumi(istanza: Istanza) -> str:
     """Stringa di riepilogo leggibile, con il conteggio delle richieste inbound e outbound."""
-    inbound = sum(1 for i in istanza.utenti() if istanza.tipo_richiesta(i) == "inbound")
+    testo_L = f"L={istanza.L} min" if istanza.L is not None else "L_i per utente"
+    inbound = sum(1 for i in istanza.utenti() if istanza.tipo[i] == "inbound")
     return (
         f"Istanza {istanza.nome}: n={istanza.n} richieste, K={istanza.K} veicoli, "
-        f"Q={istanza.Q}, {istanza._testo_L()}, T={istanza.T} min | "
+        f"Q={istanza.Q}, {testo_L}, T={istanza.T} min | "
         f"{len(istanza.nodi)} nodi | inbound={inbound}, outbound={istanza.n - inbound}"
     )
 
 
 if __name__ == "__main__":
     import sys
-    for arg in sys.argv[1:] or ["a2-16.txt"]:
+    for arg in sys.argv[1:] or ["dati_milp/a2-16.txt"]:
         ist = leggi_istanza(arg)
         print(riassumi(ist))
