@@ -1,20 +1,22 @@
 """
-converti_pbf.py — Da un estratto .osm.pbf a un file .osm (XML) con le sole strade.
+Da un estratto OpenStreetMap in formato .osm.pbf a un file .osm (XML) con le sole strade.
 
-Perche' serve: OSMnx costruisce grafi da file OSM XML (graph_from_xml), non dal
-formato binario PBF. Qui teniamo TUTTE le way con tag "highway", anche quelle
-pedonali: la decisione su cosa e' carrabile resta in un solo posto,
-cioe' arco_carrabile() in rete_osm.py.
+È il passo che precede rete_osm.py: OSMnx costruisce il grafo da file OSM XML
+(graph_from_xml), non dal formato binario PBF. Si tengono tutte le way con tag
+"highway", anche quelle pedonali: cosa è percorribile in auto lo decide soltanto
+arco_carrabile() in rete_osm.py.
 
-Dopo la conversione il file viene controllato: ogni nodo citato da una way
-deve essere presente nel file, altrimenti OSMnx non saprebbe dove si trova.
+Dopo la conversione il file viene controllato: ogni nodo citato da una way deve
+essere presente, altrimenti OSMnx non saprebbe dove si trova.
 
-Requisito:  pip install osmium      (il pacchetto si chiama "osmium", non "pyosmium")
+Per Trieste si è usato l'estratto comunale di "estratti OpenStreetMap Italia"
+(Wikimedia Italia). Dati © contributori OpenStreetMap, licenza ODbL.
 
-Uso da terminale:
-    python converti_pbf.py OpenMap\\trieste.osm.pbf
-Produce:
-    OpenMap\\trieste_highway.osm
+Requisito:  pip install osmium   (il pacchetto si chiama "osmium", non "pyosmium")
+
+Uso (dalla cartella del progetto):
+    python converti_pbf.py trieste_osm.pbf
+Produce, nella stessa cartella, trieste_osm_highway.osm (da passare a rete_osm.py).
 """
 
 import math
@@ -22,9 +24,11 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import osmium
+
 
 def nome_uscita(pbf: Path) -> Path:
-    """trieste.osm.pbf -> trieste_highway.osm  (stessa cartella)."""
+    """trieste_osm.pbf (o trieste_osm.osm.pbf) -> trieste_osm_highway.osm, nella stessa cartella."""
     nome = pbf.name
     for suffisso in (".osm.pbf", ".pbf"):
         if nome.endswith(suffisso):
@@ -34,16 +38,16 @@ def nome_uscita(pbf: Path) -> Path:
 
 
 def estrai_strade(pbf: Path, uscita: Path) -> int:
-    """Scrive in `uscita` le way con tag highway e i nodi a cui fanno riferimento."""
-    import osmium   # importato qui: verifica_completezza() funziona anche senza pyosmium
-
-    # legge SOLO le way (osmium.osm.WAY) e lascia passare solo quelle con chiave "highway"
-    way_stradali = osmium.FileProcessor(str(pbf), osmium.osm.WAY) \
-                         .with_filter(osmium.filter.KeyFilter("highway"))
+    """
+    Scrive in `uscita` le way con tag highway e i nodi a cui fanno riferimento.
+    Restituisce il numero di way scritte.
+    """
+    way_stradali = osmium.FileProcessor(str(pbf), osmium.osm.WAY).with_filter(
+        osmium.filter.KeyFilter("highway"))
 
     quante = 0
-    # BackReferenceWriter: alla chiusura rilegge ref_src e aggiunge i nodi citati dalle way.
-    # Il formato di uscita (XML) e' scelto dall'estensione .osm del file.
+    # alla chiusura il writer rilegge il .pbf e aggiunge i nodi citati dalle way;
+    # il formato XML lo decide l'estensione .osm del file di uscita
     with osmium.BackReferenceWriter(str(uscita), ref_src=str(pbf), overwrite=True) as writer:
         for way in way_stradali:
             writer.add(way)
@@ -52,13 +56,17 @@ def estrai_strade(pbf: Path, uscita: Path) -> int:
 
 
 def verifica_completezza(percorso_osm: Path) -> set[str]:
-    """Controlla che ogni <nd ref> delle way abbia il suo <node>. Restituisce gli id mancanti."""
+    """
+    Controlla che ogni nodo citato dalle way (<nd ref>) sia presente nel file e stampa
+    un riepilogo. Restituisce gli id dei nodi mancanti.
+    """
     nodi_presenti: set[str] = set()
     riferimenti: set[str] = set()
     n_way = 0
     lat_min = lon_min = math.inf
     lat_max = lon_max = -math.inf
 
+    # lettura a flusso: il file di una città intera non viene caricato tutto in memoria
     for _evento, elem in ET.iterparse(percorso_osm, events=("end",)):
         if elem.tag == "node":
             nodi_presenti.add(elem.get("id"))
@@ -76,6 +84,7 @@ def verifica_completezza(percorso_osm: Path) -> set[str]:
     print(f"File controllato: {percorso_osm.name}")
     print(f"  way: {n_way}   nodi: {len(nodi_presenti)}   nodi citati dalle way: {len(riferimenti)}")
     if nodi_presenti:
+        # un grado di latitudine vale circa 111.2 km; uno di longitudine va scalato per cos(lat)
         lat_media = (lat_min + lat_max) / 2
         alto_km = (lat_max - lat_min) * 111.2
         largo_km = (lon_max - lon_min) * 111.2 * math.cos(math.radians(lat_media))
@@ -86,10 +95,11 @@ def verifica_completezza(percorso_osm: Path) -> set[str]:
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Uso: python converti_pbf.py <file.osm.pbf>")
-        sys.exit(1)
+        sys.exit("Uso: python converti_pbf.py <file.osm.pbf>")
 
     pbf = Path(sys.argv[1])
+    if not pbf.is_file():
+        sys.exit(f"file non trovato: {pbf}")
     uscita = nome_uscita(pbf)
 
     print(f"Estraggo le strade da {pbf.name} ...")
@@ -104,4 +114,4 @@ if __name__ == "__main__":
             "calcolare la lunghezza degli archi verso quei nodi. Non procedere con\n"
             "rete_osm.py: questo caso va gestito prima."
         )
-    print("\nFile completo: si puo' passare a  python rete_osm.py", uscita)
+    print(f"\nFile completo: si può passare a  python rete_osm.py {uscita}")
