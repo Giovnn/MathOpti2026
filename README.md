@@ -125,7 +125,7 @@ instances.py → graph.py → model.py → objectives.py → results.py
 ## Requisiti e installazione
 
 - **Python 3.13** o successivo (sviluppato con 3.13, verificato anche con 3.14).
-- **Gurobi 13** con una licenza valida. Il pacchetto `gurobipy` installato con pip include una licenza limitata ai modelli piccoli, non sufficiente per le istanze più grandi: serve una licenza completa (per le università è disponibile gratuitamente la licenza accademica).
+- **Gurobi 13** con una licenza valida. Il pacchetto `gurobipy` installato con pip include una licenza limitata ai modelli piccoli, non sufficiente per le istanze più grandi: serve una licenza completa (come la licenza accademica).
 
 ```bash
 git clone https://github.com/Giovnn/MathOpti2026.git
@@ -226,11 +226,11 @@ flowchart LR
     D -->|visualizza_trieste.py| H["mappa HTML"]
 ```
 
-> **Riproducibilità.** I prodotti dei passi 0–3 (rete stradale e istanze) sono già nel repository, così come il CSV del passo 4. Per riprodurre tabelle, rotte e mappa si può partire direttamente dal passo 5.
+> **Riproducibilità.** I prodotti dei passi 1–3 (rete stradale e istanze) sono già nel repository, così come il CSV del passo 4. Per riprodurre tabelle, rotte e mappa si può partire direttamente dal passo 5.
 
 ### Passo 0: dati OpenStreetMap
 
-Si parte dall'estratto comunale di Trieste in formato `.pbf`, preso da *Estratti OpenStreetMap Italia* (Wikimedia Italia). L'estratto è stato convertito in `.osm` tenendo solo le strade, cioè le way con tag `highway`. Il file risultante, `trieste_osm_highway.osm`, non è incluso nel repository perché si ricava dalla fonte.
+Si parte dall'estratto comunale di Trieste in formato `.pbf`, preso da *Estratti OpenStreetMap Italia* (Wikimedia Italia). L'estratto è stato convertito in OSM XML con pyosmium, tenendo solo le way con tag `highway` e i nodi a cui fanno riferimento, perché OSMnx legge solo il formato XML. Il file risultante, `trieste_osm_highway.osm`, non è incluso nel repository.
 
 ### Passo 1: rete stradale (`rete_osm.py`)
 
