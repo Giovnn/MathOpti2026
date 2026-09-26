@@ -227,6 +227,7 @@ flowchart LR
     E -->|tabelle.py| F["Tabelle 8–12<br/>e confronto con Wuppertal"]
     D -->|rotte.py| G["Tabelle 13–14"]
     D -->|visualizza_trieste.py| H["mappa HTML"]
+    B -.->|rete stradale| H
 ```
 
 > **Riproducibilità.** I prodotti dei passi 0–3 (file `.osm`, rete stradale e istanze) sono già nel repository, così come il CSV del passo 4. Per riprodurre tabelle, rotte e mappa si può partire direttamente dal passo 5.
