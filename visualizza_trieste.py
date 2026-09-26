@@ -41,6 +41,8 @@ from functools import lru_cache
 from pathlib import Path
 
 import networkx as nx
+from instances import leggi_istanza
+from graph import Grafo
 
 # Etichette leggibili degli obiettivi (le chiavi sono quelle di objectives.py).
 ETICHETTE = {
@@ -240,8 +242,7 @@ def compagni_di_viaggio(eventi: list[int]) -> dict[int, list[int]]:
             a_bordo.remove(-e)
     return compagni
 
-
-def risolvi_rotte(grafo, obiettivo: str, time_limit: float) -> tuple[str, list[dict]]:
+def risolvi_rotte(grafo: Grafo, obiettivo: str, time_limit: float) -> tuple[str, list[dict]]:
     """
     Risolve Model II con l'obiettivo dato (stessi moduli di esperimenti.py, MIPGap = 0)
     e restituisce (stato, rotte). Di ogni rotta tiene, posizione per posizione:
@@ -411,8 +412,6 @@ def dati_istanza(percorso_json: Path, G: nx.MultiDiGraph, obiettivi: list[str],
                                            "Soluzione non calcolata: solo percorsi diretti, "
                                            "un colore per richiesta", n))
     else:
-        from instances import leggi_istanza
-        from graph import Grafo
         grafo = Grafo.costruisci(leggi_istanza(percorso_json))  # non dipende dall'obiettivo
         for ob in obiettivi:
             try:
