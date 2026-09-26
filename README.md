@@ -217,13 +217,15 @@ Il paper verifica i suoi obiettivi su istanze generate sulla rete stradale di Wu
 
 ```mermaid
 flowchart LR
-    A[".osm di Trieste<br/>(non incluso)"] -->|rete_osm.py| B["trieste_osm_highway_drive.graphml"]
+    A[".pbf di Trieste<br/>(non incluso)"] -->|converti_pbf.py| O["trieste_osm_highway.osm<br/>solo way highway"]
+    O -->|rete_osm.py| B["trieste_osm_highway_drive.graphml"]
     B -->|osm_city.py| C["60 istanze JSON<br/>con K = n"]
-    C -->|imposta_k.py| D["istanze_trieste/<br/>K dalla Tabella 7"]
-    D -->|esperimenti.py| E["risultati_trieste.csv<br/>276 run"]
+    C -->|imposta_k.py| D["60 JSON con K_stato<br/>46 utilizzabili, K dalla Tabella 7<br/>14 escluse"]
+    D -->|esperimenti.py| E["risultati_trieste.csv<br/>276 run = 46 × 6 obiettivi"]
     E -->|tabelle.py| F["Tabelle 8–12<br/>e confronto con Wuppertal"]
-    D -->|rotte.py| G["Tabelle 13–14"]
+    D -->|rotte.py| G["Tabelle 13–14<br/>(Q3.20.5, f_cr e f_rcr)"]
     D -->|visualizza_trieste.py| H["mappa HTML"]
+    B -.->|rete stradale| H
 ```
 
 > **Riproducibilità.** I prodotti dei passi 1–3 (rete stradale e istanze) sono già nel repository, così come il CSV del passo 4. Per riprodurre tabelle, rotte e mappa si può partire direttamente dal passo 5.
