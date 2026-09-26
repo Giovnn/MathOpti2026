@@ -138,7 +138,7 @@ source venv/bin/activate         # macOS / Linux
 pip install -r requirements.txt
 ```
 
-`osmium` (pyosmium), `osmnx` e `geopandas` servono solo per rigenerare la rete stradale e le istanze (`converti_pbf.py`, `rete_osm.py`, `osm_city.py`). Modelli, test, tabelle e mappa funzionano anche senza.
+`osmium` (pyosmium) e `osmnx` servono solo per rigenerare la rete stradale e le istanze (`converti_pbf.py`, `rete_osm.py`, `osm_city.py`). Modelli, test, tabelle e mappa funzionano anche senza.
 
 Tutti i comandi di questo README si lanciano **dalla cartella principale del repository**. Nei percorsi si può usare `/` anche su Windows.
 
