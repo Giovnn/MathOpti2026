@@ -24,7 +24,6 @@ Il lavoro è diviso in due parti:
 - [Risultati principali](#risultati-principali)
 - [Scelte implementative e differenze rispetto al paper](#scelte-implementative-e-differenze-rispetto-al-paper)
 - [Usare i moduli da Python](#usare-i-moduli-da-python)
-- [Formato dei file](#formato-dei-file)
 - [Riferimenti e licenze dei dati](#riferimenti-e-licenze-dei-dati)
 
 ---
