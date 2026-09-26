@@ -467,12 +467,12 @@ Sulle istanze grandi pesa anche il time limit più breve (600 s contro 7200 s): 
 
 | Aspetto | Paper | Questo progetto |
 |---|---|---|
-| Solver | CPLEX 12.10 | Gurobi 13 (su un altro computer) |
+| Solver | CPLEX 12.10 | Gurobi 13 |
 | Time limit | 7200 s | 7200 s in `scalability.py`, 600 s nei 276 run di Trieste |
 | Tolleranza di ottimalità | default del solver | MIPGap 0 in `test.py`, `esperimenti.py` e `rotte.py`; 1e-4 in `scalability.py` |
 | Città | Wuppertal | Trieste. Wuppertal non è stata rigenerata: il confronto è con i valori pubblicati, guardando segni e ordini di grandezza, non i valori esatti |
 | Numero di veicoli | intervallo per gruppo (Tabella 7) | minimo valore fattibile nell'intervallo; 14 istanze escluse, medie sulle 46 utilizzabili |
-| Generazione delle istanze | dettagli non specificati | deposito, fermate, distanza minima e ricampionamento dichiarati nella tabella del passo 2 |
+| Generazione delle istanze | dettagli non specificati | deposito, fermate, distanza minima e ricampionamento dichiarati nella tabella di passo 2 |
 
 ---
 
@@ -500,64 +500,6 @@ m = costruisci_con_obiettivo(grafo, "fcr", variante="II", time_limit=60, log=Fal
 r = risolvi(m)
 print(r.obj, r.tempo, len(r.rotte), "veicoli usati")
 ```
-
----
-
-## Formato dei file
-
-### Istanze Cordeau (`dati_milp/*.txt`)
-
-```
-K n T Q L                          riga 1: veicoli, richieste, orizzonte, capacità, ride time
-id x y servizio domanda e l        una riga per nodo
-```
-
-La numerazione dei nodi è:
-
-- `0`: deposito iniziale;
-- `1..n`: pickup;
-- `n+1..2n`: drop-off (quello della richiesta `i` è `n+i`);
-- `2n+1`: deposito finale.
-
-La domanda è positiva al pickup e negativa al drop-off.
-
-### Istanze Trieste (`istanze_trieste/*.json`, formato `darp-osm-v1`)
-
-La numerazione dei nodi è la stessa delle istanze Cordeau.
-
-| Campo | Contenuto |
-|---|---|
-| `formato` | `"darp-osm-v1"` |
-| `nome`, `citta`, `seed` | per esempio `Trieste_Q3.20.5`, `Trieste`, `Trieste-Q3-n20-m5` |
-| `rete` | file GraphML da cui è stata generata l'istanza |
-| `n`, `Q`, `T`, `velocita_kmh` | richieste, capacità, orizzonte in minuti, velocità |
-| `K` | numero di veicoli (quello della Tabella 7 se `K_stato = "tabella7"`) |
-| `nodi` | per ogni nodo: `id`, nodo OSM, `lat`/`lon`, servizio, domanda, finestra `e`/`l`; i pickup hanno anche il ride time massimo `L` e il `tipo` |
-| `costo_km` | matrice (2n+2) × (2n+2) delle distanze su strada, in km |
-| `scelte`, `scarti` | parametri di generazione e richieste scartate, divise per motivo |
-| `K_stato`, `K_tabella7`, `K_esiti`, `K_time_limit` | esito di `imposta_k.py` |
-
-Il **nome del file** deve coincidere con il campo `nome`, per esempio `Trieste_Q3.20.5.json`, con i punti. Il codice ricava il nome dell'istanza dal nome del file, e il CSV dei risultati identifica i run con quel nome.
-
-### Risultati Trieste (`risultati/risultati_trieste.csv`)
-
-<details>
-<summary>Una riga per run: le colonne</summary>
-
-| Colonne | Contenuto |
-|---|---|
-| `istanza`, `Q`, `n`, `K` | istanza risolta |
-| `obiettivo`, `variante` | funzione obiettivo e modello (sempre `II`) |
-| `stato` | `ottimo` oppure `time_limit` |
-| `obj`, `bound`, `gap` | valore dell'obiettivo, bound del solver, gap di ottimalità |
-| `tempo`, `nodi_bb` | secondi di calcolo e nodi del branch-and-bound |
-| `veicoli` | veicoli usati |
-| `costo`, `regret`, `regret_max` | criteri canonici, calcolati sullo schedule minimo |
-| `regret_grezzo`, `regret_max_grezzo` | stessi criteri letti dalle variabili del solver |
-| `rifiuti`, `ar`, `regret_medio_servito` | richieste rifiutate, richieste accettate, regret medio degli utenti serviti |
-| `time_limit`, `mip_gap`, `nota` | parametri del run e annotazioni |
-
-</details>
 
 ---
 
