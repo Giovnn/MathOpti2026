@@ -31,6 +31,7 @@ from instances import leggi_istanza
 from graph import Grafo
 from objectives import costruisci_con_obiettivo, regret_utente
 from results import risolvi, Risultato, Rotta
+from tabelle import PASSO_CARATTERE, ALTEZZA_RIGA, MARGINE_ALTO, MARGINE_BASSO
 
 
 # Gli obiettivi delle Tabelle 13 e 14 del paper.
@@ -69,6 +70,13 @@ def regret_per_utente(risultato: Risultato, istanza) -> dict[int, float]:
         for utente, arrivo in rotta.arrivi().items():
             valori[utente] = regret_utente(istanza, utente, arrivo)
     return valori
+
+
+def positivi_e_rifiutati(regret: dict[int, float], istanza) -> tuple[dict[int, float], list[int]]:
+    """Utenti con regret positivo (oltre gli arrotondamenti) e utenti rifiutati."""
+    positivi = {i: r for i, r in sorted(regret.items()) if r > 1e-6}
+    rifiutati = sorted(set(istanza.utenti()) - set(regret))
+    return positivi, rifiutati
 
 
 # ----------------------------------------------------------------------
@@ -113,7 +121,7 @@ def stampa_soluzione(risultato: Risultato, istanza) -> None:
         stampa_tour(numero, rotta)
 
     regret = regret_per_utente(risultato, istanza)
-    positivi = {i: r for i, r in sorted(regret.items()) if r > 1e-6}
+    positivi, rifiutati = positivi_e_rifiutati(regret, istanza)
     print()
     if positivi:
         testo = ", ".join(f"{i}: {r:.1f}" for i, r in positivi.items())
@@ -123,7 +131,6 @@ def stampa_soluzione(risultato: Risultato, istanza) -> None:
     else:
         print("  nessun utente subisce perdita di tempo: regret nullo per tutti")
 
-    rifiutati = sorted(set(istanza.utenti()) - set(regret))
     if rifiutati:
         print(f"  utenti rifiutati: {', '.join(str(i) for i in rifiutati)}")
 
@@ -167,13 +174,6 @@ def stampa_confronto(prima: Risultato, seconda: Risultato, istanza) -> None:
 # Immagine PNG
 # ----------------------------------------------------------------------
 
-# Misure del disegno, in pollici: le stesse proporzioni di tabelle.py.
-PASSO_CARATTERE = 0.085
-ALTEZZA_RIGA = 0.26
-MARGINE_ALTO = 0.75
-MARGINE_BASSO = 0.30
-
-
 def png_soluzione(risultato: Risultato, istanza, percorso: Path) -> None:
     """
     Disegna le rotte in un PNG da affiancare alla Tabella 13 o 14 del paper. Le rotte
@@ -202,15 +202,13 @@ def png_soluzione(risultato: Risultato, istanza, percorso: Path) -> None:
     etichetta = "  Tour 00   Location  "
 
     # righe di testo sotto la tabella: riepilogo, regret, rifiuti
-    regret = regret_per_utente(risultato, istanza)
-    positivi = {i: r for i, r in sorted(regret.items()) if r > 1e-6}
+    positivi, rifiutati = positivi_e_rifiutati(regret_per_utente(risultato, istanza), istanza)
     piede = []
     if positivi:
         piede += textwrap.wrap(
             "regret positivo (minuti): "
             + ", ".join(f"{i}: {r:.1f}" for i, r in positivi.items()),
             width=int((len(etichetta) + massimo_eventi * cella) * 1.2))
-    rifiutati = sorted(set(istanza.utenti()) - set(regret))
     if rifiutati:
         piede.append("utenti rifiutati: " + ", ".join(str(i) for i in rifiutati))
 
@@ -300,7 +298,7 @@ def salva(risultati: list[Risultato], istanza, cartella: Path) -> None:
 
 # ----------------------------------------------------------------------
 # Programma principale
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Tabelle 13 e 14: rotte di una singola istanza.")
