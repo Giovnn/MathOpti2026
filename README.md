@@ -161,7 +161,7 @@ python visualizza_trieste.py istanze_trieste/Trieste_Q3.20.*.json --rete trieste
 
 ### Le istanze
 
-La cartella `dati_milp/` contiene 46 istanze del benchmark di Cordeau (2006), nel formato descritto in [Formato dei file](#formato-dei-file):
+La cartella `dati_milp/` contiene 46 istanze del benchmark di Cordeau (2006):
 
 - **serie a:** `Q = 3`, un posto per utente, `L = 30`;
 - **serie b:** `Q = 6`, da 1 a 6 posti per utente, `L = 45`.
