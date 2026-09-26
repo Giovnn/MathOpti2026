@@ -95,6 +95,7 @@ MathOpti2026/
 ├── scalability.py          scalabilità di Model I e Model II
 │
 │   Caso di studio Trieste (Parte 2)
+├── converti_pbf.py         estratto .pbf → file .osm con le sole strade (pyosmium)
 ├── rete_osm.py             file .osm → grafo stradale carrabile (GraphML)
 ├── osm_city.py             GraphML → 60 istanze JSON (ricetta del caso Wuppertal)
 ├── imposta_k.py            numero di veicoli di ogni istanza dalla Tabella 7 del paper
@@ -106,6 +107,7 @@ MathOpti2026/
 │   Dati e risultati
 ├── dati_milp/              46 istanze Cordeau + a2-4 (istanza ridotta di prova)
 ├── istanze_trieste/        60 istanze Trieste in formato JSON
+├── trieste_osm_highway.osm              strade di Trieste in formato OSM XML
 ├── trieste_osm_highway_drive.graphml    rete stradale di Trieste
 └── risultati/
     ├── scalability.csv, scalability.png
@@ -136,7 +138,7 @@ source venv/bin/activate         # macOS / Linux
 pip install -r requirements.txt
 ```
 
-`osmnx` e `geopandas` servono solo per rigenerare la rete stradale e le istanze (`rete_osm.py`, `osm_city.py`). Modelli, test, tabelle e mappa funzionano anche senza.
+`osmium` (pyosmium), `osmnx` e `geopandas` servono solo per rigenerare la rete stradale e le istanze (`converti_pbf.py`, `rete_osm.py`, `osm_city.py`). Modelli, test, tabelle e mappa funzionano anche senza.
 
 Tutti i comandi di questo README si lanciano **dalla cartella principale del repository**. Nei percorsi si può usare `/` anche su Windows.
 
@@ -217,7 +219,8 @@ Il paper verifica i suoi obiettivi su istanze generate sulla rete stradale di Wu
 
 ```mermaid
 flowchart LR
-    A[".osm di Trieste<br/>(non incluso)"] -->|rete_osm.py| B["trieste_osm_highway_drive.graphml"]
+    P[".pbf di Trieste<br/>(non incluso)"] -->|converti_pbf.py| A["trieste_osm_highway.osm"]
+    A -->|rete_osm.py| B["trieste_osm_highway_drive.graphml"]
     B -->|osm_city.py| C["60 istanze JSON<br/>con K = n"]
     C -->|imposta_k.py| D["istanze_trieste/<br/>K dalla Tabella 7"]
     D -->|esperimenti.py| E["risultati_trieste.csv<br/>276 run"]
@@ -226,11 +229,24 @@ flowchart LR
     D -->|visualizza_trieste.py| H["mappa HTML"]
 ```
 
-> **Riproducibilità.** I prodotti dei passi 1–3 (rete stradale e istanze) sono già nel repository, così come il CSV del passo 4. Per riprodurre tabelle, rotte e mappa si può partire direttamente dal passo 5.
+> **Riproducibilità.** I prodotti dei passi 0–3 (file `.osm`, rete stradale e istanze) sono già nel repository, così come il CSV del passo 4. Per riprodurre tabelle, rotte e mappa si può partire direttamente dal passo 5.
 
-### Passo 0: dati OpenStreetMap
+### Passo 0: dati OpenStreetMap (`converti_pbf.py`)
 
-Si parte dall'estratto comunale di Trieste in formato `.pbf`, preso da *Estratti OpenStreetMap Italia* (Wikimedia Italia). L'estratto è stato convertito in OSM XML con pyosmium, tenendo solo le way con tag `highway` e i nodi a cui fanno riferimento, perché OSMnx legge solo il formato XML. Il file risultante, `trieste_osm_highway.osm`, non è incluso nel repository.
+Si parte dall'estratto comunale di Trieste in formato `.pbf`, preso da *Estratti OpenStreetMap Italia* (Wikimedia Italia). OSMnx costruisce grafi solo da file OSM XML (`graph_from_xml`), non dal formato binario `.pbf`. Per questo il primo passo converte l'estratto in XML, tenendo solo ciò che serve.
+
+```bash
+pip install osmium                      # pyosmium: su PyPI il pacchetto si chiama "osmium"
+python converti_pbf.py trieste_osm.pbf  # produce trieste_osm_highway.osm
+```
+
+Lo script usa pyosmium, il binding Python della libreria libosmium, e lavora in tre fasi:
+
+1. **Filtro.** Legge solo le way del `.pbf` e tiene quelle con tag `highway`, comprese le pedonali. La decisione su cosa sia percorribile in auto resta così in un solo punto del progetto, la funzione `arco_carrabile()` di `rete_osm.py`.
+2. **Scrittura.** Scrive le way filtrate e poi rilegge il `.pbf` per aggiungere i nodi a cui fanno riferimento. Il formato di uscita (OSM XML) è scelto dall'estensione `.osm`.
+3. **Verifica.** Controlla, con la sola libreria standard, che ogni nodo citato da una way sia presente nel file. Serve perché un estratto tagliato sul confine comunale può lasciare strade che citano nodi esterni: OSMnx creerebbe archi verso punti senza coordinate e fallirebbe nel calcolo delle lunghezze. Sull'estratto di Trieste i nodi mancanti sono risultati zero.
+
+Il `.pbf` non è incluso nel repository, mentre il file prodotto, `trieste_osm_highway.osm`, sì. OpenStreetMap cambia nel tempo, quindi un estratto scaricato oggi darebbe una rete leggermente diversa. Partendo dal `.osm` del repository si lavora invece sugli stessi dati usati per il progetto, e si può ripartire direttamente dal passo 1.
 
 ### Passo 1: rete stradale (`rete_osm.py`)
 
@@ -241,7 +257,7 @@ python rete_osm.py trieste_osm_highway.osm
 Il file `.osm` viene trasformato nel grafo carrabile in quattro fasi:
 
 1. caricamento completo del file, senza semplificare;
-2. rimozione degli archi non percorribili in auto (lista bianca dei tipi di strada, esclusi gli accessi vietati);
+2. rimozione degli archi non percorribili in auto, con la funzione `arco_carrabile()`: lista bianca dei tipi di strada, esclusi gli accessi vietati;
 3. estrazione della componente fortemente connessa più grande, così ogni punto raggiunge ogni altro rispettando i sensi unici;
 4. semplificazione, che toglie i nodi intermedi che non sono incroci.
 
@@ -548,5 +564,5 @@ Il **nome del file** deve coincidere con il campo `nome`, per esempio `Trieste_Q
 
 - D. Gaul, K. Klamroth, M. Stiglmayr (2022). *Event-based MILP models for ridepooling applications*. European Journal of Operational Research, 301(3). DOI: [10.1016/j.ejor.2021.11.053](https://doi.org/10.1016/j.ejor.2021.11.053)
 - J.-F. Cordeau (2006). *A branch-and-cut algorithm for the dial-a-ride problem*. Operations Research, 54(3), 573–586. È la fonte delle istanze in `dati_milp/`.
-- **Dati stradali:** © OpenStreetMap contributors, con licenza [Open Database License (ODbL)](https://www.openstreetmap.org/copyright). Il file `trieste_osm_highway_drive.graphml` e le istanze in `istanze_trieste/` sono derivati da questi dati, tramite l'estratto comunale di *Estratti OpenStreetMap Italia* (Wikimedia Italia).
+- **Dati stradali:** © OpenStreetMap contributors, con licenza [Open Database License (ODbL)](https://www.openstreetmap.org/copyright). I file `trieste_osm_highway.osm` e `trieste_osm_highway_drive.graphml` e le istanze in `istanze_trieste/` sono derivati da questi dati, tramite l'estratto comunale di *Estratti OpenStreetMap Italia* (Wikimedia Italia).
 - **Sfondo della mappa HTML:** © OpenStreetMap contributors, © CARTO.
